@@ -1,0 +1,16 @@
+idea	d4c5f9	An idea or request. The product pass turns it into a spec PR.
+proposed	c5def5	A spec PR is open for this idea.
+agreed	0e8a16	Product and CTO signed off on the spec. Waiting on Garrett to merge it.
+spec	5319e7	A spec pull request.
+ready	1d76db	A build issue the foreman may start once its blockers are closed.
+building	fbca04	A worker has this issue.
+in-review	0052cc	Its PR is open; CI and the cross-family review are running.
+needs:garrett	b60205	Parked with one question and a default. The queue keeps moving.
+risk:high	e11d21	Data, auth, money, migrations or deploy. Garrett merges the build PR too.
+size:s	ededed	Under about an hour of agent work.
+size:m	cfd3d7	A few hours of agent work.
+size:l	bfd4f2	Too big for one build issue; the spec should split it.
+lane:claude	f9d0c4	Prefer the Claude lane.
+lane:codex	c2e0c6	Prefer the Codex lane.
+lane:cursor	fef2c0	Prefer the Cursor lane.
+lane:grok	e4e669	Prefer the Grok lane.
