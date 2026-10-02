@@ -1,6 +1,6 @@
 ---
 name: build
-description: Build one agent-kit build issue into one pull request, tests first, inside the worktree the foreman gives you; also handles fix rounds (CI failure, review findings, rebase). Works in Claude Code and Codex.
+description: Build one agent-kit build issue into one pull request, tests first, inside the worktree the foreman gives you; also handles fix rounds (CI failure, review findings, rebase). Works in Claude Code, Codex and Cursor.
 ---
 
 # Build
@@ -25,9 +25,11 @@ If your sandbox refuses `git push` or `gh`, write the PR body to `AK_PR.md` at t
 - **Review blocked.** For each blocking finding, run its repro command, fix the code, and show the repro passing. Reply under the review with what changed for each finding, or your evidence if you think the finding is wrong. Push.
 - **Conflict with main.** `git rebase origin/main`, keep both sides' intent, rerun `scripts/done --fast`, then `git push --force-with-lease`. This is the only force-push allowed anywhere: your own build branch, never main.
 
+If your sandbox refuses `git push` or `gh`, commit everything and write `AK_FIX.md` at the worktree root (it is gitignored) instead of pushing and replying: what you would have replied, finding by finding, plus the commits you made and the summary of each check you ran. Then stop. The foreman pushes and posts it.
+
 ## When to stop
 
-- **Done:** the PR is open (or `AK_PR.md` is written) and your local checks are green, with their summary pasted in the PR.
+- **Done:** the PR is open or pushed (or `AK_PR.md` or `AK_FIX.md` is written) and your local checks are green, with their summary pasted in the PR.
 - **Stuck:** the same failure three times, or the spec is ambiguous or contradicts the code. Comment on the issue with the failing command and the tail of its output, label it `needs:garrett` with one question and a default, and stop. Do not keep looping.
 - **Budget:** about 60 turns.
 

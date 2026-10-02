@@ -18,7 +18,7 @@ Write Garrett's agent-kit digest for the last 24 hours, across every project in 
 3. Proposed: new spec PRs, with size and estimate.
 4. Building now: issue, lane, round.
 5. Failures by cause: CI, review, conflict, staging, restart, with counts and rounds used.
-6. Lanes: jobs per lane, and usage against limits (Claude from claude agents --json, Codex weekly percent from the newest ~/.codex/sessions file).
+6. Lanes: jobs per lane, and usage against limits, read the way ~/code/agent-kit/lanes.md says for each lane.
 7. The number: PRs merged to staging per hour of Garrett's attention, counting each of his comments, merges and label changes as 3 minutes.
 
 No em or en dashes. Under 40 lines.
