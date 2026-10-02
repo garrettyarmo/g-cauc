@@ -38,7 +38,7 @@ cd <worktree> && nohup codex exec --json -m gpt-6.1-sol --sandbox workspace-writ
 cd <worktree> && nohup cursor-agent -p --output-format stream-json --model <model id> --sandbox enabled --force --trust --workspace <worktree> --add-dir <repo>/.git "<prompt>" < /dev/null > <log> 2>&1 &
 ```
 
-`--add-dir <repo>/.git` lets a job commit inside a linked worktree. Model ids: `composer-2.5`, `grok-4.7-medium`, `grok-4.7-high`, `grok-4.7-xhigh`, `gemini-3.7-flash-high`. List them with `cursor-agent --list-models`. Use only the local CLI: Cursor's cloud agents bill at API prices.
+`--add-dir <repo>/.git` lets a job commit inside a linked worktree. Model ids: `composer-2.5`, `grok-4.7-medium`, `grok-4.7-high`, `grok-4.7-xhigh`, `gemini-3.7-flash-high`. List them with `cursor-agent --list-models`. Use only the local CLI: Cursor's cloud agents bill at API prices. GPT and Claude models through Cursor bill differently from Cursor's own models and use up the plan faster, so they are never a lane default; run one by hand only when every lane in a routing row is out (GPT-5.6 Sol through Cursor gave a correct PASS on CallFlow PR 71).
 
 ## Telling when a lane is out
 

@@ -5,7 +5,7 @@ description: Review one g-cauc pull request from the model family that did not b
 
 # Agent review
 
-You did not write this code and you are not the builder's model family. Your job is to stop broken or unproven work from merging, not to restyle it. The foreman's prompt gives you the repo, the PR number, a worktree at the PR's head commit, and the round.
+You did not write this code and your model family has no commit on this branch. Your job is to stop broken or unproven work from merging, not to restyle it. The foreman's prompt gives you the repo, the PR number, a worktree at the PR's head commit, and the round. If your sandbox cannot reach GitHub (Codex and Cursor jobs), it also gives files holding the issue and, for a recheck, the earlier review: read those instead of GitHub, and use `git diff origin/main...HEAD`.
 
 ## Check
 
@@ -42,4 +42,4 @@ You did not write this code and you are not the builder's model family. Your job
    gh api repos/<owner>/<repo>/statuses/<full head sha> -f state=<success|failure> -f context=agent-review -f description="<one line>"
    ```
 
-If your sandbox has no network, write the comment to `AK_REVIEW.md` at the worktree root with `VERDICT: PASS|BLOCK sha=<full head sha>` as its first line, and stop. The foreman posts it and sets the status.
+If your sandbox has no network, do not retry `gh`. Write the comment to `AK_REVIEW.md` at the worktree root, and stop. Its first line is exactly `VERDICT: PASS sha=<full head sha>` or `VERDICT: BLOCK sha=<full head sha>` (the sha from `git rev-parse HEAD`); the foreman sets no status on anything else. End it with `Follow-ups:` listing the advisory findings that should become issues (at most two, or `none`), since you cannot file them. Commit nothing and edit no tracked file. The foreman posts it, sets the status and opens the follow-ups.
