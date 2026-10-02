@@ -2,7 +2,7 @@
 
 One way of working for every project Garrett runs: ideas go into GitHub issues, agents turn them into agreed specs, and approved specs get built, reviewed, merged and deployed to staging without anyone watching. Production is Garrett's tap until a project has 10 clean staging runs.
 
-agent-kit is instructions, not software. The loop is Claude Desktop scheduled tasks, the queue is GitHub Issues, the judge is GitHub's required checks, and the workers are the Claude and Codex command-line tools. Nothing here holds state; state lives in GitHub and git. Design and research: `~/code/nessy/docs/proposals/2026-10-01-no-harness.md`. Diagram: https://claude.ai/artifact/TzKoUxmuhAmwQT2fWCHxEb
+agent-kit is instructions, not software. The loop is Claude Desktop scheduled tasks, the queue is GitHub Issues, the judge is GitHub's required checks, and the workers are the Claude, Codex and Cursor command-line tools. Nothing here holds state; state lives in GitHub and git. Design and research: `~/code/nessy/docs/proposals/2026-10-01-no-harness.md`. Diagram: https://claude.ai/artifact/TzKoUxmuhAmwQT2fWCHxEb
 
 Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 

@@ -23,7 +23,7 @@ When the `lane:` label on an issue names a lane that is out, route by this map i
 
 ## The cross-family rule
 
-The reviewer's family is never the builder's. Families: Anthropic (`claude`), OpenAI (`codex`), xAI (`grok`, `grok-xai`), Cursor (`composer`), Google (`gemini`), Meta (`muse`). When the first choice in a review row is the builder's own family, skip to the next. If every other family is out, a same-family review is allowed: say "same family" in the review comment and the status description.
+The reviewer's family is never one that has a commit on the branch. Families: Anthropic (`claude`), OpenAI (`codex`), xAI (`grok`, `grok-xai`), Cursor (`composer`), Google (`gemini`), Meta (`muse`). A model counts as its maker's family wherever it runs, so GPT through Cursor is OpenAI. A branch's families are the lanes in its issue's `ak:start` and `ak:round` comments plus any `Co-Authored-By` trailer on its commits, so a fix round in a stronger lane adds that lane's family (CallFlow PR 74 was built by Codex and finished by Claude, so neither could review it). When the first choice in a review row is one of those families, skip to the next. If every other family is out, a same-family review is allowed: say "same family" in the review comment and the status description.
 
 ## Why the map looks like this
 
