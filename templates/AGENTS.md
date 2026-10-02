@@ -1,6 +1,6 @@
 # PROJECT: the agent map
 
-Every agent reads this file: Claude Code through CLAUDE.md, and Codex, Cursor, Grok and OpenCode directly. Keep it a map under about 150 lines. Procedures live in the agent-kit skills (`~/code/agent-kit`); enforcement lives in scripts, CI and branch protection.
+Every agent reads this file: Claude Code through CLAUDE.md, and Codex, Cursor, Grok and OpenCode directly. Keep it a map under about 150 lines. Procedures live in the g-cauc skills (`~/code/g-cauc`); enforcement lives in scripts, CI and branch protection.
 
 Autonomy: attended
 

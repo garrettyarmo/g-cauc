@@ -1,6 +1,6 @@
 ---
 name: spec
-description: The CTO session. Use when Garrett wants to plan with you, either kicking off a new project or phase (challenge assumptions, research, choose the stack, write the foundation and phase plan) or turning one feature idea into a spec. Ends with a spec pull request that carries the CTO sign-off; the product pass then adds the product sign-off. Part of agent-kit (~/code/agent-kit).
+description: The CTO session. Use when Garrett wants to plan with you, either kicking off a new project or phase (challenge assumptions, research, choose the stack, write the foundation and phase plan) or turning one feature idea into a spec. Ends with a spec pull request that carries the CTO sign-off; the product pass then adds the product sign-off. Part of g-cauc (~/code/g-cauc).
 ---
 
 # CTO session
@@ -21,18 +21,18 @@ Say which mode you are in before starting.
 5. **Write the foundation.**
    - `specs/000-foundation.md`: product, users, scope and non-goals, architecture, stack, environments (dev, CI, staging, production), and the test layers that fit this app.
    - `ROADMAP.md`: phases, each with exit criteria a machine can check.
-   - Phase 1 is always the walking skeleton: the agent-kit contract (the `adopt` skill), one thin real feature through every gate to staging, and the end-to-end harness with a seeded signed-in user. Unattended building starts only after phase 1.
+   - Phase 1 is always the walking skeleton: the g-cauc contract (the `adopt` skill), one thin real feature through every gate to staging, and the end-to-end harness with a seeded signed-in user. Unattended building starts only after phase 1.
 6. **Spec only the next phase.** Break it into feature specs. Later phases stay one paragraph each until their turn.
 
 Kickoff can span several sittings. Keep the foundation as a draft spec PR and update it each time.
 
-While this session drives builds itself during the attended phase, it should run under a goal so it keeps going without "keep going" messages. Claude cannot set `/goal` itself; ask Garrett to type one, for example `/goal every ready, building and in-review row of spec 001 is merged or labeled needs:garrett, shown by gh issue list output, or stop after 12 hours`. While it runs, show `gh issue list` output whenever a row changes state, since the goal's judge only sees the transcript. Route workers by `~/code/agent-kit/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
+While this session drives builds itself during the attended phase, it should run under a goal so it keeps going without "keep going" messages. Claude cannot set `/goal` itself; ask Garrett to type one, for example `/goal every ready, building and in-review row of spec 001 is merged or labeled needs:garrett, shown by gh issue list output, or stop after 12 hours`. While it runs, show `gh issue list` output whenever a row changes state, since the goal's judge only sees the transcript. Route workers by `~/code/g-cauc/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
 
 ## Feature
 
 1. Read the idea, AGENTS.md, related specs, DECISIONS.md and the code it touches.
 2. Interview in batches of at most five questions, each with a default. Name the gaps Garrett did not mention: errors, empty states, permissions, data migration, cost, abuse, observability.
-3. Write the spec from `~/code/agent-kit/templates/spec.md`.
+3. Write the spec from `~/code/g-cauc/templates/spec.md`.
 
 ## What makes a spec buildable unattended
 
@@ -56,7 +56,7 @@ While this session drives builds itself during the attended phase, it should run
 A sign-off is a PR comment for one exact commit. Any new commit on the spec branch voids both sign-offs, and the spec needs both again.
 
 ```
-<!-- agent-kit:signoff role=cto sha=<full head sha> -->
+<!-- g-cauc:signoff role=cto sha=<full head sha> -->
 CTO sign-off on <short sha>: <one line on why it is right and buildable>.
 ```
 

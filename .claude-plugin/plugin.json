@@ -1,0 +1,16 @@
+{
+  "name": "g-cauc",
+  "version": "0.3.0",
+  "description": "g-cauc: Garrett's caucus of AI models. Spec, product pass, foreman, build and review skills, plus the /board pane and the permission advisor.",
+  "author": {
+    "name": "Garrett Yarmowich"
+  },
+  "userConfig": {
+    "kit_dir": {
+      "type": "directory",
+      "title": "g-cauc folder",
+      "description": "Where your g-cauc folder lives: projects.md, lanes.md and limits/ are read from here.",
+      "default": "~/code/g-cauc"
+    }
+  }
+}

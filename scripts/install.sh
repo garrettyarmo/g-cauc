@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Link every agent-kit skill into Claude Code and Codex. Safe to rerun.
+# Link every g-cauc skill into Codex. Safe to rerun. Claude Code gets the
+# skills from the g-cauc plugin instead (see README).
 # Refuses to replace anything at the target that is not already a symlink.
 set -euo pipefail
 
 kit="$(cd "$(dirname "$0")/.." && pwd)"
-targets=("$HOME/.claude/skills" "$HOME/.codex/skills")
+targets=("$HOME/.codex/skills")
 
 for target in "${targets[@]}"; do
   mkdir -p "$target"

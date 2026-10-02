@@ -2,7 +2,7 @@
 
 Create in the Claude Desktop app: Code tab, Routines, New routine, Local.
 
-- Name: `agent-kit-digest`
+- Name: `g-cauc-digest`
 - Schedule: daily, 7:00
 - Permission mode: auto
 - Model: Sonnet 5.5
@@ -11,7 +11,7 @@ Create in the Claude Desktop app: Code tab, Routines, New routine, Local.
 Instructions:
 
 ```
-Write Garrett's agent-kit digest for the last 24 hours, across every project in ~/code/agent-kit/projects.md, and post it as a new comment on the open issue titled "Daily digest" in garrettyarmo/agent-kit (create and pin it if missing) so it reaches his phone. Lead with what needs him. Sections, each skipped when empty:
+Write Garrett's g-cauc digest for the last 24 hours, across every project in ~/code/g-cauc/projects.md, and post it as a new comment on the open issue titled "Daily digest" in garrettyarmo/g-cauc (create and pin it if missing) so it reaches his phone. Lead with what needs him. Sections, each skipped when empty:
 
 1. Needs you: needs:garrett issues and agreed spec PRs, each with its one question and default, as links.
 2. Shipped: PRs merged to main and whether staging deployed and passed its smoke run.

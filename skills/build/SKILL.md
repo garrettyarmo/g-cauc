@@ -1,6 +1,6 @@
 ---
 name: build
-description: Build one agent-kit build issue into one pull request, tests first, inside the worktree the foreman gives you; also handles fix rounds (CI failure, review findings, rebase). Works in Claude Code and Codex.
+description: Build one g-cauc build issue into one pull request, tests first, inside the worktree the foreman gives you; also handles fix rounds (CI failure, review findings, rebase). Works in Claude Code and Codex.
 ---
 
 # Build

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create or update the agent-kit label set on one repo: labels.sh OWNER/REPO
+# Create or update the g-cauc label set on one repo: labels.sh OWNER/REPO
 set -euo pipefail
 
 repo="${1:?usage: labels.sh OWNER/REPO}"

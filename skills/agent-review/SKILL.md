@@ -1,6 +1,6 @@
 ---
 name: agent-review
-description: Review one agent-kit pull request from the model family that did not build it, in fresh context, against its spec; post the verdict and set the agent-review commit status on the exact head commit. Started by the foreman.
+description: Review one g-cauc pull request from the model family that did not build it, in fresh context, against its spec; post the verdict and set the agent-review commit status on the exact head commit. Started by the foreman.
 ---
 
 # Agent review
