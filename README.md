@@ -1,8 +1,10 @@
-# agent-kit
+# g-cauc
+
+Garrett's caucus: AI models from different companies that have to agree before anything ships.
 
 One way of working for every project Garrett runs: ideas go into GitHub issues, agents turn them into agreed specs, and approved specs get built, reviewed, merged and deployed to staging without anyone watching. Production is Garrett's tap until a project has 10 clean staging runs.
 
-agent-kit is instructions, not software. The loop is Claude Desktop scheduled tasks, the queue is GitHub Issues, the judge is GitHub's required checks, and the workers are the Claude, Codex and Cursor command-line tools. Nothing here holds state; state lives in GitHub and git. Design and research: `~/code/nessy/docs/proposals/2026-10-01-no-harness.md`. Diagram: https://claude.ai/artifact/TzKoUxmuhAmwQT2fWCHxEb
+g-cauc is instructions, not software. The loop is Claude Desktop scheduled tasks, the queue is GitHub Issues, the judge is GitHub's required checks, and the workers are the Claude, Codex and Cursor command-line tools. Nothing here holds state; state lives in GitHub and git. Design and research: `~/code/nessy/docs/proposals/2026-10-01-no-harness.md`. Diagram: https://claude.ai/artifact/TzKoUxmuhAmwQT2fWCHxEb
 
 Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 
@@ -22,7 +24,9 @@ Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 | `routing.md` | Which model for which job, the fallback order when a lane is out, and the cross-family rule. |
 | `projects.md` | The projects the product pass and foreman serve, in priority order. |
 | `tasks/` | The instructions for the three Desktop scheduled tasks: product pass, foreman, 7am digest. |
-| `scripts/install.sh` | Links every skill into `~/.claude/skills` and `~/.codex/skills`. |
+| `hooks/` | The mod: `/board` (milestone, running jobs with their thinking and commands, lanes), the quiet line above the prompt, and the permission advisor. Tests in `tests/`. |
+| `.claude-plugin/` | The plugin and marketplace manifests, so Claude Code installs all of this as one plugin. |
+| `scripts/install.sh` | Links every skill into `~/.codex/skills` for Codex. Claude gets them from the plugin. |
 | `scripts/labels.sh` | Creates or updates the label set on a repo. |
 
 ## The contract every project meets
@@ -68,13 +72,36 @@ Other labels: `spec` (spec PRs), `from-review` (advisory findings, batched into 
 
 ## Install
 
+Claude Code (the skills, `/board` and the permission advisor), once:
+
 ```bash
-~/code/agent-kit/scripts/install.sh
+claude plugin marketplace add ~/code/g-cauc
 ```
 
 ```bash
-~/code/agent-kit/scripts/labels.sh garrettyarmo/callflow
+claude plugin install g-cauc@g-cauc
 ```
+
+After changing the kit, bump `version` in `.claude-plugin/plugin.json`, then `claude plugin update g-cauc@g-cauc` and `/reload-plugins` in open sessions. While working on the mod itself, load the folder directly with `claude --plugin-dir ~/code/g-cauc` and run `claude plugin test` in it.
+
+Codex reads the same skills through links:
+
+```bash
+~/code/g-cauc/scripts/install.sh
+```
+
+```bash
+~/code/g-cauc/scripts/labels.sh garrettyarmo/callflow
+```
+
+## Make it yours
+
+The kit ships with Garrett's setup as its defaults. To run it for yourself:
+
+1. Clone it anywhere. If that is not `~/code/g-cauc`, set the plugin's "g-cauc folder" in `/config`.
+2. Replace the rows in `projects.md` with your repos.
+3. Edit `lanes.md` to match your subscriptions: set `Max jobs` to 0 for any lane you do not have.
+4. Run `scripts/labels.sh <owner>/<repo>` on each repo, then the `adopt` skill in each one.
 
 ## Rules for changing the kit
 

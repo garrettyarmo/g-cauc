@@ -1,6 +1,6 @@
 ---
 name: cto-review
-description: Review one agent-kit spec as the CTO before anything is built, read-only, and print a verdict of AGREE, CHANGES or ESCALATE. Run by the product pass on the model family that did not write the spec.
+description: Review one g-cauc spec as the CTO before anything is built, read-only, and print a verdict of AGREE, CHANGES or ESCALATE. Run by the product pass on the model family that did not write the spec.
 ---
 
 # CTO review of a spec

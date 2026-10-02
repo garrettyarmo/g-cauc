@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: One agent-kit foreman pass over every unattended project, run by a scheduled task every 15 minutes. Carries failures back to builders, starts cross-family reviews, starts ready build issues in every free lane, cleans up, then exits. Never waits on workers and never writes code itself.
+description: One g-cauc foreman pass over every unattended project, run by a scheduled task every 15 minutes. Carries failures back to builders, starts cross-family reviews, starts ready build issues in every free lane, cleans up, then exits. Never waits on workers and never writes code itself.
 ---
 
 # Foreman pass
@@ -9,8 +9,8 @@ You run one pass and exit. You keep nothing between passes: GitHub, git and the 
 
 ## Before anything
 
-- If `~/code/agent-kit/STOP` exists, print its contents and exit.
-- Read `~/code/agent-kit/lanes.md`, `~/code/agent-kit/routing.md` and `~/code/agent-kit/projects.md`. A lane with an unexpired file in `~/code/agent-kit/limits/` is out.
+- If `~/code/g-cauc/STOP` exists, print its contents and exit.
+- Read `~/code/g-cauc/lanes.md`, `~/code/g-cauc/routing.md` and `~/code/g-cauc/projects.md`. A lane with an unexpired file in `~/code/g-cauc/limits/` is out.
 - Work only in projects whose AGENTS.md says `Autonomy: unattended`.
 - Touch only build issues and their PRs. Ideas and spec PRs belong to the product pass.
 
@@ -19,7 +19,7 @@ You run one pass and exit. You keep nothing between passes: GitHub, git and the 
 For project P (its folder name) and issue N:
 
 - Worktree: `~/code/<P>_wt/ak-<N>`. Branch: `build/<N>-<slug>`.
-- Logs: `~/code/<P>_wt/logs/<N>-<role>-<round>.log`.
+- Logs: `~/code/<P>_wt/logs/<N>-<role>-<round>-<lane>.jsonl`, written as structured events by the commands in `lanes.md`.
 - Every worker prompt starts with the marker `[ak:<P>#<N>:<role>:<round>]`, where role is `build`, `fix` or `review`. Claude jobs are named `ak-<P>-<N>-<role>`.
 - Live jobs: `claude agents --json` (by name), and `pgrep -fl "ak:<P>#<N>"` for Codex and Cursor jobs (the command line shows the CLI and `--model`, which tells you the lane).
 - Round counts live in GitHub as comments: `<!-- ak:round gate=<ci|review|rebase|staging|restart> n=<k> lane=<lane> -->`. Count them; post one each time you send work back. With `ak:start`, they give the branch's families for the cross-family rule in `routing.md`.
@@ -33,7 +33,7 @@ For project P (its folder name) and issue N:
    - `AK_PR.md` in its worktree: push the branch, open the PR with that body, add the labels the `build` skill lists, turn on auto-merge unless `risk:high`, delete the file.
    - `AK_FIX.md`: push the branch (`--force-with-lease` after a `rebase` round) and post the file as a PR comment, then delete it. Push only what the worker committed; never commit for it.
    - `AK_REVIEW.md`: post it as the PR comment, set the `agent-review` status from its first line on that exact sha, naming the reviewing model in the description, open each item under `Follow-ups:` as an issue labeled `idea` and `from-review`, then delete it. If the first line is not exactly `VERDICT: PASS sha=<40 hex>` or `VERDICT: BLOCK sha=<40 hex>`, set no status: move the file to the log folder and start a fresh review.
-   - A log that ends on a usage limit: write the lane's reset time to `~/code/agent-kit/limits/<lane>`, and start the same job in the next lane of its row in `routing.md`.
+   - A log that ends on a usage limit: write the lane's reset time to `~/code/g-cauc/limits/<lane>`, and start the same job in the next lane of its row in `routing.md`.
 4. **Send failures back**, each PR at most once per pass. The fix goes to the lane given by the "Fix round" row of `routing.md`. Work keeps moving until it is fixed; there is no fixed number of rounds.
    - CI red on the head commit: start a `fix` job with the failed log (`gh run view <run> --log-failed`, last 200 lines saved to the log folder).
    - `agent-review` failed on the head commit: start a `fix` job with the review comment; the recheck then runs as a normal review.

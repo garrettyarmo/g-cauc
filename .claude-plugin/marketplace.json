@@ -1,0 +1,14 @@
+{
+  "name": "g-cauc",
+  "owner": {
+    "name": "Garrett Yarmowich"
+  },
+  "plugins": [
+    {
+      "name": "g-cauc",
+      "source": "./",
+      "description": "Skills for spec, product pass, foreman, build and review, plus the /board pane and the permission advisor."
+    }
+  ],
+  "description": "g-cauc: Garrett's caucus of AI models that agree before anything ships."
+}

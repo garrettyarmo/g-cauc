@@ -18,7 +18,7 @@ Weight is how hard a job in that lane draws on its subscription. Light lanes are
 
 ## Launch commands
 
-Every prompt starts with the foreman's marker `[ak:<project>#<issue>:<role>:<round>]`.
+Every prompt starts with the foreman's marker `[ak:<project>#<issue>:<role>:<round>]`. Every log goes to `~/code/<project>_wt/logs/<issue>-<role>-<round>-<lane>.jsonl` as structured events: that is what lets `/board` show each job's thinking, commands and verdict. Claude jobs need no log file; `/board` reads their transcripts.
 
 **Claude** (can push and open PRs itself):
 
@@ -29,20 +29,20 @@ cd <worktree> && claude --bg --name "ak-<P>-<N>-<role>" --permission-mode auto -
 **Codex** (if its sandbox refuses `git push`, it commits and leaves `AK_PR.md`):
 
 ```bash
-cd <worktree> && nohup codex exec -m gpt-6.1-sol --sandbox workspace-write "<prompt>" < /dev/null > <log> 2>&1 &
+cd <worktree> && nohup codex exec --json -m gpt-6.1-sol --sandbox workspace-write "<prompt>" < /dev/null > <log> 2>&1 &
 ```
 
 **Cursor lanes** (`composer`, `grok`, `gemini`), proven on CallFlow 2026-10-02. The sandbox blocks GitHub, so these jobs never push or comment; they leave `AK_PR.md`, `AK_FIX.md` or `AK_REVIEW.md` and the foreman posts it.
 
 ```bash
-cd <worktree> && nohup cursor-agent -p --model <model id> --sandbox enabled --force --trust --workspace <worktree> --add-dir <repo>/.git "<prompt>" < /dev/null > <log> 2>&1 &
+cd <worktree> && nohup cursor-agent -p --output-format stream-json --model <model id> --sandbox enabled --force --trust --workspace <worktree> --add-dir <repo>/.git "<prompt>" < /dev/null > <log> 2>&1 &
 ```
 
 `--add-dir <repo>/.git` lets a job commit inside a linked worktree. Model ids: `composer-2.5`, `grok-4.7-medium`, `grok-4.7-high`, `grok-4.7-xhigh`, `gemini-3.7-flash-high`. List them with `cursor-agent --list-models`. Use only the local CLI: Cursor's cloud agents bill at API prices. GPT and Claude models through Cursor bill differently from Cursor's own models and use up the plan faster, so they are never a lane default; run one by hand only when every lane in a routing row is out (GPT-5.6 Sol through Cursor gave a correct PASS on CallFlow PR 71).
 
 ## Telling when a lane is out
 
-A lane is out when its last job failed on a usage limit. Whoever sees the limit writes the reset time to `~/code/agent-kit/limits/<lane>` as one ISO 8601 line (the folder is gitignored). A lane is out while that time is in the future; an expired file means the lane is back. This is the kit's one cache: it is safe to delete, and deleting it only costs one failed job.
+A lane is out when its last job failed on a usage limit. Whoever sees the limit writes the reset time to `~/code/g-cauc/limits/<lane>` as one ISO 8601 line (the folder is gitignored). A lane is out while that time is in the future; an expired file means the lane is back. This is the kit's one cache: it is safe to delete, and deleting it only costs one failed job.
 
 - `claude`: `claude agents --json` shows a session waiting on a usage limit, with its reset time.
 - `codex`: the job log says it hit the limit and when it resets (for example "try again at Oct 6th, 2026 3:21 PM").
