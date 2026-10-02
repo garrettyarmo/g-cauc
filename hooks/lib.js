@@ -104,7 +104,7 @@ export function sanitize(text, max = 9000) {
   return t.length > max ? '…' + t.slice(-(max - 1)) : t
 }
 
-const exitOf = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+const exitOf = (v) => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^-?\d{1,10}$/.test(v) ? Number(v) : null)
 
 export const labelsOf = (issue) => (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name))
 
@@ -407,8 +407,9 @@ export function bandText(projects, jobs) {
 // side carries extra fields.
 export function callKey(tool, input) {
   const i = input && typeof input === 'object' ? input : {}
-  const id = i.command ?? i.file_path ?? i.path ?? i.url ?? i.pattern ?? i.query
-  return tool + '\u0000' + (id !== undefined ? String(id) : JSON.stringify(i))
+  const skip = new Set(['description', 'timeout', 'run_in_background'])
+  const canon = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).filter((k) => !skip.has(k)).sort().map((k) => [k, canon(v[k])]) : v)
+  return tool + '\u0000' + JSON.stringify(canon(i))
 }
 
 // Permission advisor: the rule strings in a PermissionRequest's own

@@ -133,7 +133,7 @@ test('a cold start with projects.md missing shows the last snapshot any session 
   const saved = new Map<string, unknown>()
   saved.set('snapshot', {
     at: Date.now() - 10 * 60_000,
-    lanes: [],
+    lanes: [{ lane: 'codex', family: 'OpenAI', weight: 'heavy', max: 3, status: 'on' }],
     projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }],
   })
   saved.set('needsSeen', ['garrettyarmo/callflow#16'])
@@ -145,6 +145,8 @@ test('a cold start with projects.md missing shows the last snapshot any session 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
+  await ui.press({ key: 'tab-lanes' })
+  expect(await ui.find({ type: 'Text', text: /codex.*0\/3 jobs.*out until/ })).toBeDefined()
   world.projectsGone = false
   await ui.unmount()
 })
@@ -187,9 +189,15 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 3' }, permission_suggestions: sugg })
   await $.classic.PostToolUse({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'gh pr view 4' }, tool_response: {}, tool_use_id: 'D' })
   expect(saved.get(key)).toEqual({ count: 9, state: 'counting' })
-  await ask('ok-9', true)
+  // Two open asks for the same command: dialogs arrive in call order, so approving the first counts once.
+  await $.tool.check({ tool: 'Bash', input: { command: 'gh pr view 71 --json state' }, tool_use_id: 'E' })
+  await $.tool.check({ tool: 'Bash', input: { command: 'gh pr view 71 --json state' }, tool_use_id: 'F' })
+  await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 71 --json state' }, permission_suggestions: sugg })
+  await $.classic.PostToolUse({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'gh pr view 71 --json state' }, tool_response: {}, tool_use_id: 'E' })
   expect(saved.get(key)).toEqual({ count: 10, state: 'suggested' })
-  expect(toasts.some((t) => t.includes('Bash(gh pr view:*) 10 times'))).toBe(true)
+  await ask('ok-9', true)
+  expect(saved.get(key)).toEqual({ count: 11, state: 'suggested' })
+  expect(toasts.filter((t) => t.includes('Bash(gh pr view:*) 10 times')).length).toBe(1)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-allow' })

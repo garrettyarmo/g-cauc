@@ -229,3 +229,15 @@ test('round 3: exit codes are numbers or nothing, and a dialog matches its call 
   expect(callKey('Bash', { command: 'gh pr view 1', description: 'x' })).toBe(callKey('Bash', { command: 'gh pr view 1' }))
   expect(callKey('Bash', { command: 'gh pr view 1' })).not.toBe(callKey('Bash', { command: 'gh pr view 2' }))
 })
+
+test('round 4: exit codes must be integers, and the whole input identifies a call', async () => {
+  const cmd = (code) => parseLog(JSON.stringify({ type: 'tool_call', subtype: 'completed', tool_call: { shellToolCall: { args: { command: 'x' }, result: { success: { exitCode: code } } } } })).steps[0].exit
+  expect(cmd(0)).toBe(0)
+  expect(cmd('1')).toBe(1)
+  expect(cmd('\n')).toBe(null)
+  expect(cmd('0x1b')).toBe(null)
+  expect(cmd('1e2')).toBe(null)
+  expect(callKey('Grep', { pattern: 'alpha', path: 'src' })).not.toBe(callKey('Grep', { pattern: 'beta', path: 'src' }))
+  expect(callKey('Grep', { path: 'src', pattern: 'alpha' })).toBe(callKey('Grep', { pattern: 'alpha', path: 'src' }))
+  expect(callKey('Bash', { command: 'ls', description: 'list' })).toBe(callKey('Bash', { command: 'ls' }))
+})

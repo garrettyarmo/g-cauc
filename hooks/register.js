@@ -104,7 +104,7 @@ export function register(on, options) {
       // or path). Anything else, including no match, counts nothing.
       const key = callKey(e.tool_name, e.tool_input)
       const match = [...asks.values()].filter((a) => a.key === key && !a.rules)
-      const ask = match.length ? match[match.length - 1] : null
+      const ask = match.length ? match[0] : null
       if (ask) {
         ask.rules = rules
         ask.cwd = e.cwd
@@ -183,7 +183,11 @@ async function refresh($, force) {
     // Nothing on screen yet (a cold start): show the last snapshot any session saved.
     if (projects.length === 0 && cached && Array.isArray(cached.projects)) {
       projects = cached.projects.map((p) => ({ ...p, stale: true }))
-      lanes = cached.lanes || lanes
+      try {
+        lanes = await withLaneState($, cached.lanes || [])
+      } catch {
+        lanes = []
+      }
     }
   } finally {
     busy = false
@@ -479,7 +483,7 @@ function lanesView(E) {
   const out = []
   for (const l of lanes) {
     const state = l.outUntil ? `out until ${l.outUntil.slice(0, 16).replace('T', ' ')}` : l.max === 0 ? 'off' : 'on'
-    out.push(Text({ dimColor: l.max === 0, children: [`${l.lane}`.padEnd(10) + `${l.family}`.padEnd(11) + `${l.running}/${l.max} jobs`.padEnd(11) + `${l.weight}`.padEnd(8) + state] }))
+    out.push(Text({ dimColor: l.max === 0, children: [`${l.lane}`.padEnd(10) + `${l.family}`.padEnd(11) + `${l.running ?? 0}/${l.max} jobs`.padEnd(11) + `${l.weight}`.padEnd(8) + state] }))
   }
   if (claudeLimits.length) {
     out.push(Text({ bold: true, children: ['Claude plan'] }))
