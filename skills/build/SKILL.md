@@ -25,6 +25,8 @@ If your sandbox refuses `git push` or `gh`, write the PR body to `AK_PR.md` at t
 - **Review blocked.** For each blocking finding, run its repro command, fix the code, and show the repro passing. Reply under the review with what changed for each finding, or your evidence if you think the finding is wrong. Push.
 - **Conflict with main.** `git rebase origin/main`, keep both sides' intent, rerun `scripts/done --fast`, then `git push --force-with-lease`. This is the only force-push allowed anywhere: your own build branch, never main.
 
+If your sandbox cannot reach GitHub during a fix round, commit, write what changed for each finding to `AK_FIX.md` at the worktree root, and stop. The foreman pushes and posts it.
+
 ## When to stop
 
 - **Done:** the PR is open (or `AK_PR.md` is written) and your local checks are green, with their summary pasted in the PR.

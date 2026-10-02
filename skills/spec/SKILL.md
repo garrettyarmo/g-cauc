@@ -17,7 +17,7 @@ Say which mode you are in before starting.
 1. **Read what exists.** AGENTS.md or CLAUDE.md, docs, prior specs and acceptance lists, DECISIONS.md, the code layout, and any business context the repo points to. Summarize what exists, and what state it is in, in about ten lines.
 2. **Challenge the assumptions.** List the load-bearing ones: users and their problem, scale, stack, vendors, deployment, compliance, pricing, timeline. For each, give the evidence for it and what changes if it is wrong. Mark the ones worth researching.
 3. **Research in parallel.** Start one research subagent per open question. Each cites sources with dates. For a stack choice, compare two or three options on: fit for the product, operating burden for a one-person owner, cost at the expected scale, how well agents work in it (typed, fast tests, easy local stack, an ecosystem models know well), and lock-in. Come back with a recommendation and its tradeoff.
-4. **Decide with Garrett.** Present decisions in batches of at most five, each with options, a recommendation and a default. Record every decision in DECISIONS.md, newest last.
+4. **Decide with Garrett.** Present decisions in batches of at most five, each with options, a recommendation and a default. Record every decision in DECISIONS.md, newest last. One decision always belongs in the first batch: who may merge build PRs during the attended phase once CI and the cross-family review are green. On CallFlow the session waited about five hours overnight for that answer.
 5. **Write the foundation.**
    - `specs/000-foundation.md`: product, users, scope and non-goals, architecture, stack, environments (dev, CI, staging, production), and the test layers that fit this app.
    - `ROADMAP.md`: phases, each with exit criteria a machine can check.
@@ -25,6 +25,8 @@ Say which mode you are in before starting.
 6. **Spec only the next phase.** Break it into feature specs. Later phases stay one paragraph each until their turn.
 
 Kickoff can span several sittings. Keep the foundation as a draft spec PR and update it each time.
+
+While this session drives builds itself during the attended phase, set a goal so it keeps going without "keep going" messages, for example `/goal every ready row of spec 001 is merged or labeled needs:garrett, or stop after 8 hours`. Route workers by `~/code/agent-kit/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
 
 ## Feature
 

@@ -18,7 +18,8 @@ Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 | `skills/agent-review` | Cross-family review of one pull request. Sets the `agent-review` status. |
 | `skills/adopt` | Brings a repo up to the contract below, as one PR. |
 | `templates/` | The AGENTS.md outline, CLAUDE.md, the spec format, the label set. |
-| `lanes.md` | The providers and models that run work, with how many jobs each may run at once. |
+| `lanes.md` | The lanes (CLI, model, subscription), how many jobs each may run at once, launch commands, and how to tell a lane is out. |
+| `routing.md` | Which model for which job, the fallback order when a lane is out, and the cross-family rule. |
 | `projects.md` | The projects the product pass and foreman serve, in priority order. |
 | `tasks/` | The instructions for the three Desktop scheduled tasks: product pass, foreman, 7am digest. |
 | `scripts/install.sh` | Links every skill into `~/.claude/skills` and `~/.codex/skills`. |
@@ -63,7 +64,7 @@ Build issues:
 
 The foreman never touches an issue that is not `ready`. Nothing is `ready` until its spec was agreed by product and CTO and merged by Garrett.
 
-Other labels: `spec` (spec PRs), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
+Other labels: `spec` (spec PRs), `from-review` (advisory findings, batched into one hardening spec), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too unless he delegated it, as CallFlow's D23 does), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
 
 ## Install
 

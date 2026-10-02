@@ -19,14 +19,14 @@ You did not write this code and you are not the builder's model family. Your job
 
 - **Blocking** means a defect plus a command that fails right now: a test, a curl, a script. Without a failing command, it is advisory. Style is never blocking.
 - **Round 2 is a recheck.** Verify that the earlier blocking findings are fixed and that the fix broke nothing. Do not start a fresh hunt.
-- At most two advisory findings become follow-up issues, each labeled `idea` so the product pass picks them up.
+- At most two advisory findings become follow-up issues, each labeled `idea` and `from-review`. The product pass batches those into one hardening spec instead of one spec each (day 1 filed 20 of them).
 
 ## Report
 
 1. Comment on the PR:
 
    ```
-   ## agent-review (<model family>) on <short sha>: PASS | BLOCK
+   ## agent-review (<model id>, <family>) on <short sha>: PASS | BLOCK
 
    | Blocking | Finding | Repro command | Expected | Actual |
    |---|---|---|---|---|

@@ -1,19 +1,49 @@
 # Lanes
 
-A lane is one provider and model that can run work. There is no global limit on jobs: the foreman fills every lane up to its own `Max jobs`, across all projects, so adding a provider, a model or a bigger plan adds capacity. Raise `Max jobs` when a plan grows. Add a row for a new provider once its CLI passed one real build issue by hand.
+A lane is one CLI and model that can run work. There is no global limit on jobs: the foreman fills every lane up to its own `Max jobs`, across all projects, so adding a provider, a model or a bigger plan adds capacity. Which lane does which job, and the fallback order, is in `routing.md`.
 
-When a lane hits its usage limit, the foreman skips it until the limit resets and sends new work to the other lanes. A job already running in that lane waits and resumes on its own.
+## The lanes
 
-| Lane | CLI and launch | Model | Max jobs | Does | Notes |
+| Lane | Family | Subscription | Weight | Max jobs | Status |
 |---|---|---|---|---|---|
-| `claude` | `claude --bg --permission-mode auto --model opus` | Opus 5.5 | 4 | build, agent-review, propose | Can push and open PRs itself. Pauses at a usage limit and resumes after reset. |
-| `codex` | `codex exec -m gpt-6.1-sol` (detached, see foreman) | GPT-6.1 Sol | 4 | build, agent-review, cto-review | Weekly limit only on Pro. If its sandbox refuses `git push`, it commits and the foreman pushes and opens the PR. |
-| `cursor` | `cursor-agent -p --model composer-2.5` | Composer 2.5 | 0 | chores | Off until tried by hand. Cloud agents bill at API price; use the local CLI only. |
-| `grok` | `grok -p` | Grok 4.7 | 0 | chores, third-family review | Off until tried by hand. Needs the folder trusted once. |
+| `composer` | Cursor | Cursor Ultra | light | 6 | on |
+| `grok` | xAI | Cursor Ultra | light | 6 | on |
+| `claude` | Anthropic | Claude Max 20x | medium | 4 | on |
+| `codex` | OpenAI | ChatGPT Pro ($100) | heavy | 3 | on; its weekly allowance lasted about one day of full use on 2026-10-01 |
+| `gemini` | Google | Cursor Ultra | light | 2 | on, for chores and as a spare reviewing family |
+| `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: run `grok login` once if you have SuperGrok, then set Max jobs |
+| `muse` | Meta | Muse Code plan | light | 0 | off: run `muse auth` once on a paid plan (never the free contributor tier, which trains on your code), then set Max jobs |
 
-Cross-family rule: the reviewer of a PR is never the builder's family. Claude builds are reviewed in the `codex` lane and Codex builds in the `claude` lane. A third family (Cursor or Grok) may stand in when a lane is at its limit.
+Weight is how hard a job in that lane draws on its subscription. Light lanes are where the volume goes. If the Mac itself bogs down (each build can boot a full local stack), lower the light lanes' Max jobs first.
 
-How the foreman reads a lane's limit:
+## Launch commands
 
-- `claude`: `claude agents --json` shows a session waiting on a usage limit.
-- `codex`: the newest file under `~/.codex/sessions/` carries `rate_limits`; over 90 percent of the weekly window counts as full.
+Every prompt starts with the foreman's marker `[ak:<project>#<issue>:<role>:<round>]`.
+
+**Claude** (can push and open PRs itself):
+
+```bash
+cd <worktree> && claude --bg --name "ak-<P>-<N>-<role>" --permission-mode auto --model opus "<prompt>"
+```
+
+**Codex** (if its sandbox refuses `git push`, it commits and leaves `AK_PR.md`):
+
+```bash
+cd <worktree> && nohup codex exec -m gpt-6.1-sol --sandbox workspace-write "<prompt>" < /dev/null > <log> 2>&1 &
+```
+
+**Cursor lanes** (`composer`, `grok`, `gemini`), proven on CallFlow 2026-10-02. The sandbox blocks GitHub, so these jobs never push or comment; they leave `AK_PR.md`, `AK_FIX.md` or `AK_REVIEW.md` and the foreman posts it.
+
+```bash
+cd <worktree> && nohup cursor-agent -p --model <model id> --sandbox enabled --force --trust --workspace <worktree> --add-dir <repo>/.git "<prompt>" < /dev/null > <log> 2>&1 &
+```
+
+`--add-dir <repo>/.git` lets a job commit inside a linked worktree. Model ids: `composer-2.5`, `grok-4.7-medium`, `grok-4.7-high`, `grok-4.7-xhigh`, `gemini-3.7-flash-high`. List them with `cursor-agent --list-models`. Use only the local CLI: Cursor's cloud agents bill at API prices.
+
+## Telling when a lane is out
+
+A lane is out when its last job failed on a usage limit. Whoever sees the limit writes the reset time to `~/code/agent-kit/limits/<lane>` as one ISO 8601 line (the folder is gitignored). A lane is out while that time is in the future; an expired file means the lane is back. This is the kit's one cache: it is safe to delete, and deleting it only costs one failed job.
+
+- `claude`: `claude agents --json` shows a session waiting on a usage limit, with its reset time.
+- `codex`: the job log says it hit the limit and when it resets (for example "try again at Oct 6th, 2026 3:21 PM").
+- Cursor lanes: the job log reports the usage or spend limit. Keep Cursor's on-demand spending off or capped, so overflow never bills at API prices.
