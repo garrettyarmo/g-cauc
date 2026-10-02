@@ -11,7 +11,7 @@ A lane is one CLI and model that can run work. There is no global limit on jobs:
 | `claude` | Anthropic | Claude Max 20x | medium | 4 | on |
 | `codex` | OpenAI | ChatGPT Pro ($100) | heavy | 3 | on; its weekly allowance lasted about one day of full use on 2026-10-01 |
 | `gemini` | Google | Cursor Ultra | light | 2 | on, for chores and as a spare reviewing family |
-| `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: run `grok login` once if you have SuperGrok, then set Max jobs |
+| `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: Garrett has only the small X subscription; Grok runs through Cursor instead |
 | `muse` | Meta | Muse Code plan | light | 0 | off: run `muse auth` once on a paid plan (never the free contributor tier, which trains on your code), then set Max jobs |
 
 Weight is how hard a job in that lane draws on its subscription. Light lanes are where the volume goes. If the Mac itself bogs down (each build can boot a full local stack), lower the light lanes' Max jobs first.

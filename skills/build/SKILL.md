@@ -30,7 +30,8 @@ If your sandbox cannot reach GitHub during a fix round, commit, write what chang
 ## When to stop
 
 - **Done:** the PR is open (or `AK_PR.md` is written) and your local checks are green, with their summary pasted in the PR.
-- **Stuck:** the same failure three times, or the spec is ambiguous or contradicts the code. Comment on the issue with the failing command and the tail of its output, label it `needs:garrett` with one question and a default, and stop. Do not keep looping.
+- **Stuck inside this job:** the same failure three times in a row with no change in what fails. Stop and report it in the PR (or `AK_FIX.md`) with the failing command and the tail of its output; the foreman decides whether a stronger lane takes the next round.
+- **The spec is wrong:** it is ambiguous or contradicts the code. Comment on the issue with the conflict, label it `needs:garrett` with one question and a default, and stop.
 - **Budget:** about 60 turns.
 
 ## PR body

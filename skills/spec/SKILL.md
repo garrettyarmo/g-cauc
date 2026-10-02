@@ -26,7 +26,7 @@ Say which mode you are in before starting.
 
 Kickoff can span several sittings. Keep the foundation as a draft spec PR and update it each time.
 
-While this session drives builds itself during the attended phase, set a goal so it keeps going without "keep going" messages, for example `/goal every ready row of spec 001 is merged or labeled needs:garrett, or stop after 8 hours`. Route workers by `~/code/agent-kit/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
+While this session drives builds itself during the attended phase, it should run under a goal so it keeps going without "keep going" messages. Claude cannot set `/goal` itself; ask Garrett to type one, for example `/goal every ready, building and in-review row of spec 001 is merged or labeled needs:garrett, shown by gh issue list output, or stop after 12 hours`. While it runs, show `gh issue list` output whenever a row changes state, since the goal's judge only sees the transcript. Route workers by `~/code/agent-kit/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
 
 ## Feature
 

@@ -13,7 +13,7 @@ The rule of thumb: volume goes to the light lanes (Composer 2.5 and Grok 4.7 thr
 | Build, size S, normal risk | `composer` Composer 2.5 | `grok` Grok 4.7 medium | `claude` Opus 5.5 |
 | Build, size M, normal risk | `grok` Grok 4.7 high | `composer` Composer 2.5 | `claude` Opus 5.5 |
 | Build, `risk:high`, or ambiguous or cross-cutting | `claude` Opus 5.5 | `codex` GPT-6.1 Sol | `grok` Grok 4.7 xhigh |
-| Fix round (CI red, review findings, rebase) | the lane that built it | `composer` Composer 2.5 | `claude` Opus 5.5 |
+| Fix round (CI red, review findings, rebase) | the lane that built it | one step stronger when stalled: `grok` Grok 4.7 high | then `claude` Opus 5.5 |
 | Review, normal risk | `grok` Grok 4.7 medium | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash |
 | Review, `risk:high` | `codex` GPT-6.1 Sol | `claude` Opus 5.5 | `grok` Grok 4.7 high |
 | Chores (dependency bumps, lint, flaky tests, docs) | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash | |
@@ -29,4 +29,5 @@ The reviewer's family is never the builder's. Families: Anthropic (`claude`), Op
 
 - Day 1 on CallFlow (2026-10-01 to 02): the Codex allowance ran out in about a day with Codex building and reviewing at full speed, and the Cursor lane was never used because the kit shipped it switched off. Garrett wants Grok 4.7 and Composer 2.5 carrying most of the load because they draw lightest on the plans.
 - The reviews that caught the worst defects that day (a tenant isolation bypass through foreign keys, a schema filter wildcard) were strong models reviewing a different family's work. That is why `risk:high` reviews start with GPT-6.1 Sol and Opus.
+- Fix rounds keep going while they make progress (Garrett, 2026-10-02: a PR that is nearly fixed must not park while he sleeps). A stall moves the fix to a stronger model instead of stopping; only a stall on Opus 5.5, or 12 rounds on one PR, parks it.
 - Change this file when the evidence changes: a lane that keeps getting blocked in review moves down its build rows; a lane that keeps passing moves up.

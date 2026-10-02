@@ -18,7 +18,8 @@ You did not write this code and you are not the builder's model family. Your job
 ## Rules
 
 - **Blocking** means a defect plus a command that fails right now: a test, a curl, a script. Without a failing command, it is advisory. Style is never blocking.
-- **Round 2 is a recheck.** Verify that the earlier blocking findings are fixed and that the fix broke nothing. Do not start a fresh hunt.
+- **Give blocking findings IDs.** B1, B2 and so on. In a recheck, report every earlier ID as `fixed` or `still failing` (with its repro output), and number any new ones after the last ID. The foreman uses these to tell progress from a stall.
+- **Round 2 and later are rechecks.** Verify the earlier blocking findings and the new diff, and that the fix broke nothing. Do not start a fresh hunt across the whole PR.
 - At most two advisory findings become follow-up issues, each labeled `idea` and `from-review`. The product pass batches those into one hardening spec instead of one spec each (day 1 filed 20 of them).
 
 ## Report
@@ -28,8 +29,8 @@ You did not write this code and you are not the builder's model family. Your job
    ```
    ## agent-review (<model id>, <family>) on <short sha>: PASS | BLOCK
 
-   | Blocking | Finding | Repro command | Expected | Actual |
-   |---|---|---|---|---|
+   | ID | Status | Finding | Repro command | Expected | Actual |
+   |---|---|---|---|---|---|
 
    Advisory:
    - ...
