@@ -32,6 +32,8 @@ If it holds, post the product sign-off (format in the `spec` skill) and label th
 
 ## 4. New ideas
 
+Ideas labeled `from-review` are advisory findings filed by reviewers. Do not write one spec each. Once a week per project, or when ten are open, fold the open ones into a single hardening spec, close duplicates and anything already fixed, and link each from the spec.
+
 Ideas are open issues labeled `idea`, plus issues Garrett opened with no lifecycle label (`idea`, `proposed`, `agreed`, `ready`, `building`, `in-review`, `needs:garrett`) that are not build issues. Take at most three per project per pass, oldest first.
 
 For each:
@@ -52,7 +54,7 @@ The CTO review runs on the other model family, so the spec gets a real second op
    codex exec -m gpt-6.1-sol --sandbox read-only "Use the cto-review skill. Spec: specs/NNN-slug.md. Round: <n>. Previous review: <path or none>."
    ```
 
-   Save the output to `~/code/<project>_wt/logs/spec-NNN-cto-<n>.md`. If the Codex lane is at its limit (see `~/code/agent-kit/lanes.md`), run the same review in the `cursor-grok` lane with the Cursor launch from lanes.md and the prompt `Read and follow ~/code/agent-kit/skills/cto-review/SKILL.md. Do not edit files. Spec: specs/NNN-slug.md. Round: <n>. Previous review: <path or none>.`, and name Grok in the sign-off. Only if that lane is at its limit too, use a fresh-context Claude subagent and note "same family" in the sign-off.
+   Save the output to `~/code/<project>_wt/logs/spec-NNN-cto-<n>.md`. If the `codex` lane is out, follow the "CTO review of a spec" row of `~/code/agent-kit/routing.md`: Grok 4.7 high through `cursor-agent` (command in `lanes.md`, read-only, the review printed to stdout), then a fresh-context Claude subagent marked "same family" in the sign-off.
 2. Read the verdict.
    - **AGREE**: post the review as a PR comment, then the CTO sign-off quoting its summary line, then the product sign-off. Label the PR and the idea `agreed`. Post a five-line note for Garrett: what, why, size, estimate, and any decision that has a default.
    - **CHANGES**: for each required change, make it or rebut it with evidence in a PR comment. Push and run the loop again.

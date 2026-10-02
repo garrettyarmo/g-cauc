@@ -12,5 +12,7 @@ size:m	cfd3d7	A few hours of agent work.
 size:l	bfd4f2	Too big for one build issue; the spec should split it.
 lane:claude	f9d0c4	Prefer the Claude lane.
 lane:codex	c2e0c6	Prefer the Codex lane.
-lane:cursor-composer	fef2c0	Prefer the Cursor Composer lane.
-lane:cursor-grok	e4e669	Prefer the Cursor Grok lane.
+lane:composer	fef2c0	Prefer the Composer 2.5 lane (Cursor).
+lane:gemini	bfdadc	Prefer the Gemini lane (Cursor).
+lane:grok	e4e669	Prefer the Grok 4.7 lane (Cursor).
+from-review	c5def5	An advisory finding from a review. The product pass batches these into one hardening spec.

@@ -1,11 +1,11 @@
 ---
 name: agent-review
-description: Review one agent-kit pull request from a model family that has no commit on it, in fresh context, against its spec; post the verdict and set the agent-review commit status on the exact head commit. Started by the foreman.
+description: Review one agent-kit pull request from the model family that did not build it, in fresh context, against its spec; post the verdict and set the agent-review commit status on the exact head commit. Started by the foreman.
 ---
 
 # Agent review
 
-You did not write this code and your model family has no commit on this branch. Your job is to stop broken or unproven work from merging, not to restyle it. The foreman's prompt gives you the repo, the PR number, a worktree at the PR's head commit, and the round. If your sandbox cannot reach GitHub (the Codex and Cursor lanes), it also gives files holding the issue and, on round 2, the earlier review: read those instead of GitHub, and use `git diff origin/main...HEAD`.
+You did not write this code and you are not the builder's model family. Your job is to stop broken or unproven work from merging, not to restyle it. The foreman's prompt gives you the repo, the PR number, a worktree at the PR's head commit, and the round.
 
 ## Check
 
@@ -18,18 +18,19 @@ You did not write this code and your model family has no commit on this branch. 
 ## Rules
 
 - **Blocking** means a defect plus a command that fails right now: a test, a curl, a script. Without a failing command, it is advisory. Style is never blocking.
-- **Round 2 is a recheck.** Verify that the earlier blocking findings are fixed and that the fix broke nothing. Do not start a fresh hunt.
-- At most two advisory findings become follow-up issues, each labeled `idea` so the product pass picks them up. Without GitHub, list them under `Follow-ups:` in `AK_REVIEW.md` and the foreman opens them.
+- **Give blocking findings IDs.** B1, B2 and so on. In a recheck, report every earlier ID as `fixed` or `still failing` (with its repro output), and number any new ones after the last ID. The foreman uses these to tell progress from a stall.
+- **Round 2 and later are rechecks.** Verify the earlier blocking findings and the new diff, and that the fix broke nothing. Do not start a fresh hunt across the whole PR.
+- At most two advisory findings become follow-up issues, each labeled `idea` and `from-review`. The product pass batches those into one hardening spec instead of one spec each (day 1 filed 20 of them).
 
 ## Report
 
 1. Comment on the PR:
 
    ```
-   ## agent-review (<model family>) on <short sha>: PASS | BLOCK
+   ## agent-review (<model id>, <family>) on <short sha>: PASS | BLOCK
 
-   | Blocking | Finding | Repro command | Expected | Actual |
-   |---|---|---|---|---|
+   | ID | Status | Finding | Repro command | Expected | Actual |
+   |---|---|---|---|---|---|
 
    Advisory:
    - ...
@@ -41,16 +42,4 @@ You did not write this code and your model family has no commit on this branch. 
    gh api repos/<owner>/<repo>/statuses/<full head sha> -f state=<success|failure> -f context=agent-review -f description="<one line>"
    ```
 
-If your sandbox cannot reach GitHub, do not retry `gh`. Write `AK_REVIEW.md` at the worktree root instead, and stop:
-
-```
-VERDICT: <PASS or BLOCK> sha=<full head sha, from git rev-parse HEAD>
-SUMMARY: <one line for the status description>
-
-<the comment from step 1>
-
-Follow-ups:
-- <issue title>: <one line> (at most two; "none" when there are none)
-```
-
-The foreman sets no status unless the first line is exactly `VERDICT: PASS sha=<sha>` or `VERDICT: BLOCK sha=<sha>`. Commit nothing and edit no tracked file. The foreman posts the comment, sets the status on that sha, and opens the follow-ups.
+If your sandbox has no network, write the comment to `AK_REVIEW.md` at the worktree root with `VERDICT: PASS|BLOCK sha=<full head sha>` as its first line, and stop. The foreman posts it and sets the status.

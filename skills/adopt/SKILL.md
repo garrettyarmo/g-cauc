@@ -23,7 +23,7 @@ On a new branch, add:
 - `CLAUDE.md` from the template: `@AGENTS.md` plus Claude-only lines.
 - `scripts/done` (`--fast`, `--full`), `scripts/dev` (`up`, `down`, `testdb -- CMD`) and `scripts/deploy` (`staging`), each a thin wrapper over the project's own tools, under about 100 lines, holding no state. A piece that does not exist yet (often staging) exits non-zero with `not set up yet: see ROADMAP phase 1`.
 - A CI workflow: on every pull request, `scripts/done --full`; on every push to main, `scripts/deploy staging` once staging exists.
-- `.gitignore` entries for `AK_PR.md`, `AK_FIX.md` and `AK_REVIEW.md`.
+- `.gitignore` entries for `AK_PR.md` and `AK_REVIEW.md`.
 
 Prove the scripts: run `scripts/done --fast` and `--full` and paste the summaries in the PR.
 
