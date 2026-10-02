@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   parseProjects, parseLanes, parseRoadmap, issueSpec, blockers, summarizeProject, parseJobs, laneOf,
   modelName, parseEtime, fmtDuration, parseLsof, parseLog, bar, bandText, suggestedRules, withAllowed, parseClaudeAgents,
-  asArray, sanitize,
+  asArray, sanitize, callKey,
 } from '../hooks/lib.js'
 
 const PROJECTS = `# Projects
@@ -221,4 +221,11 @@ test('recheck fixes: C1 controls and error lines are cleaned, and Claude lines c
   const line = '17002 /usr/local/bin/claude --bg --name ak-callflow-35-build [ak:callflow#35:build:2] go'
   expect(parseJobs(line).length).toBe(0)
   expect(parseJobs(line, { claude: true })[0]).toMatchObject({ cli: 'claude', issue: 35, round: 2 })
+})
+
+test('round 3: exit codes are numbers or nothing, and a dialog matches its call by command', async () => {
+  const log = '{"type":"tool_call","subtype":"completed","tool_call":{"shellToolCall":{"args":{"command":"echo ok"},"result":{"success":{"exitCode":"1\\u009b[2J","executionTime":5}}}}}'
+  expect(parseLog(log).steps[0]).toMatchObject({ kind: 'cmd', text: 'echo ok', exit: null })
+  expect(callKey('Bash', { command: 'gh pr view 1', description: 'x' })).toBe(callKey('Bash', { command: 'gh pr view 1' }))
+  expect(callKey('Bash', { command: 'gh pr view 1' })).not.toBe(callKey('Bash', { command: 'gh pr view 2' }))
 })

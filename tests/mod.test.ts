@@ -129,6 +129,26 @@ test('a failed gh call keeps the last good board and does not repeat alerts', as
   await ui.unmount()
 })
 
+test('a cold start with projects.md missing shows the last snapshot any session saved', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  saved.set('snapshot', {
+    at: Date.now() - 10 * 60_000,
+    lanes: [],
+    projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }],
+  })
+  saved.set('needsSeen', ['garrettyarmo/callflow#16'])
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.projectsGone = true
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
+  world.projectsGone = false
+  await ui.unmount()
+})
+
 test('approvals are counted by call id: only prompts you approved, and the rule lands in the session working tree', async ($, on) => {
   const saved = new Map<string, unknown>()
   const toasts: string[] = []
@@ -161,6 +181,11 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   await $.tool.check({ tool: 'Bash', input: { command: 'gh pr view 2' }, tool_use_id: 'B' })
   await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 1' }, permission_suggestions: sugg })
   await $.classic.PostToolUse({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'gh pr view 2' }, tool_response: {}, tool_use_id: 'B' })
+  expect(saved.get(key)).toEqual({ count: 9, state: 'counting' })
+  // The dialog for C's command arrives while only D (a different command) is open: nothing counts.
+  await $.tool.check({ tool: 'Bash', input: { command: 'gh pr view 4' }, tool_use_id: 'D' })
+  await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 3' }, permission_suggestions: sugg })
+  await $.classic.PostToolUse({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'gh pr view 4' }, tool_response: {}, tool_use_id: 'D' })
   expect(saved.get(key)).toEqual({ count: 9, state: 'counting' })
   await ask('ok-9', true)
   expect(saved.get(key)).toEqual({ count: 10, state: 'suggested' })

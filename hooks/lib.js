@@ -104,6 +104,8 @@ export function sanitize(text, max = 9000) {
   return t.length > max ? '…' + t.slice(-(max - 1)) : t
 }
 
+const exitOf = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+
 export const labelsOf = (issue) => (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name))
 
 // "Spec 002 row 7: ..." in the title, or "Spec: specs/002-name.md" in the body.
@@ -344,7 +346,7 @@ export function parseLog(text) {
       const args = (call && call.args) || {}
       const ok = (call && call.result && call.result.success) || {}
       if (name === 'shellToolCall') {
-        steps.push({ kind: 'cmd', text: clip(args.command, 140), exit: ok.exitCode ?? null, ms: ok.executionTime ?? null, out: clip(ok.stdout || ok.stderr || '', 600) })
+        steps.push({ kind: 'cmd', text: clip(args.command, 140), exit: exitOf(ok.exitCode), ms: exitOf(ok.executionTime), out: clip(ok.stdout || ok.stderr || '', 600) })
       } else {
         const target = args.path || args.filePath || args.pattern || args.query || ''
         steps.push({ kind: 'tool', text: String(name || 'tool').replace(/ToolCall$/, '') + (target ? ' ' + clip(target, 100) : '') })
@@ -353,7 +355,7 @@ export function parseLog(text) {
     }
     if (ev.type === 'result') {
       flushThinking()
-      steps.push({ kind: 'result', text: ev.is_error ? 'failed' : 'finished', ms: ev.duration_ms ?? null })
+      steps.push({ kind: 'result', text: ev.is_error ? 'failed' : 'finished', ms: exitOf(ev.duration_ms) })
       continue
     }
     // Codex exec --json
@@ -363,7 +365,7 @@ export function parseLog(text) {
       const it = ev.item
       if (it.type === 'reasoning') steps.push({ kind: 'thinking', text: it.text || it.summary || '' })
       else if (it.type === 'agent_message') steps.push({ kind: 'say', text: it.text || '' })
-      else if (it.type === 'command_execution') steps.push({ kind: 'cmd', text: clip(it.command, 140), exit: it.exit_code ?? null, ms: null, out: clip(it.aggregated_output || '', 600) })
+      else if (it.type === 'command_execution') steps.push({ kind: 'cmd', text: clip(it.command, 140), exit: exitOf(it.exit_code), ms: null, out: clip(it.aggregated_output || '', 600) })
       else if (it.type === 'file_change') steps.push({ kind: 'tool', text: 'edit ' + (it.changes || []).map((c) => c.path).join(', ') })
       else steps.push({ kind: 'tool', text: it.type })
       continue
@@ -398,6 +400,15 @@ export function bandText(projects, jobs) {
   if (running) parts.push(`${running} running`)
   if (needs) parts.push(`${needs} need${needs === 1 ? 's' : ''} you`)
   return parts.join(' · ')
+}
+
+// Permission advisor: the part of a tool call's input that identifies it, so a
+// permission dialog and the call it belongs to compare equal even when one
+// side carries extra fields.
+export function callKey(tool, input) {
+  const i = input && typeof input === 'object' ? input : {}
+  const id = i.command ?? i.file_path ?? i.path ?? i.url ?? i.pattern ?? i.query
+  return tool + '\u0000' + (id !== undefined ? String(id) : JSON.stringify(i))
 }
 
 // Permission advisor: the rule strings in a PermissionRequest's own

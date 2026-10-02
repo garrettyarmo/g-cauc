@@ -6,7 +6,7 @@
 import {
   parseProjects, parseLanes, summarizeProject, parseJobs, laneOf, modelName, parseEtime,
   fmtDuration, parseLsof, parseLog, bar, bandText, suggestedRules, withAllowed, labelsOf, parseClaudeAgents,
-  asArray, sanitize,
+  asArray, sanitize, callKey,
 } from './lib.js'
 
 const PANE = 'g-cauc-board'
@@ -92,7 +92,7 @@ export function register(on, options) {
     if (verdict && verdict.decision === 'ask' && e.tool_use_id && next.origin && next.origin.plugin === 'engine') {
       const now = Date.now()
       for (const [id, a] of asks) if (now - a.at > 30 * 60_000) asks.delete(id)
-      asks.set(e.tool_use_id, { tool: e.tool, input: JSON.stringify(e.input), at: now, rules: null, cwd: '' })
+      asks.set(e.tool_use_id, { tool: e.tool, key: callKey(e.tool, e.input), at: now, rules: null, cwd: '' })
     }
     return verdict
   })
@@ -100,11 +100,11 @@ export function register(on, options) {
   on('classic.PermissionRequest', async ($, e, next) => {
     const rules = suggestedRules(e.permission_suggestions)
     if (rules.length) {
-      // The dialog belongs to the open ask with the same tool and input. When
-      // that is ambiguous (two open asks, no exact match), count nothing.
-      const open = [...asks.values()].filter((a) => a.tool === e.tool_name && !a.rules && Date.now() - a.at < 60_000)
-      const exact = open.filter((a) => a.input === JSON.stringify(e.tool_input))
-      const ask = exact.length === 1 ? exact[0] : open.length === 1 ? open[0] : null
+      // The dialog belongs to the open ask for the same call (tool and command
+      // or path). Anything else, including no match, counts nothing.
+      const key = callKey(e.tool_name, e.tool_input)
+      const match = [...asks.values()].filter((a) => a.key === key && !a.rules)
+      const ask = match.length ? match[match.length - 1] : null
       if (ask) {
         ask.rules = rules
         ask.cwd = e.cwd
@@ -160,8 +160,9 @@ async function refresh($, force) {
     return
   }
   busy = true
+  let cached = null
   try {
-    const cached = await $.store.get('snapshot')
+    cached = await $.store.get('snapshot')
     if (!force && cached && Date.now() - cached.at < STALE_MS) {
       projects = cached.projects
       lanes = cached.lanes
@@ -179,6 +180,11 @@ async function refresh($, force) {
     lastError = ''
   } catch (err) {
     lastError = String((err && err.message) || err)
+    // Nothing on screen yet (a cold start): show the last snapshot any session saved.
+    if (projects.length === 0 && cached && Array.isArray(cached.projects)) {
+      projects = cached.projects.map((p) => ({ ...p, stale: true }))
+      lanes = cached.lanes || lanes
+    }
   } finally {
     busy = false
     $.ui.invalidate('ui.render')
