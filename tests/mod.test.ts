@@ -24,7 +24,39 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false }
+
+FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
+FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
+
+const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
+const RUNS = JSON.stringify({ workflow_runs: [
+  { id: 501, name: 'CI', status: 'in_progress', conclusion: null, head_branch: 'build/52-inbox', display_title: 'Inbox filters', event: 'pull_request', created_at: ago(300000), run_started_at: ago(300000), updated_at: ago(1000), html_url: 'https://github.com/garrettyarmo/callflow/actions/runs/501', pull_requests: [{ number: 52 }] },
+  { id: 502, name: 'CI', status: 'queued', conclusion: null, head_branch: 'build/54-hours', display_title: 'Hours editor', event: 'pull_request', created_at: ago(300000), run_started_at: ago(300000), updated_at: ago(300000), html_url: 'u', pull_requests: [{ number: 54 }] },
+  { id: 403, name: 'CI', status: 'completed', conclusion: 'success', head_branch: 'main', display_title: 'Merge 50', event: 'push', created_at: ago(900000), run_started_at: ago(900000), updated_at: ago(700000), html_url: 'u', pull_requests: [] },
+  { id: 402, name: 'guard', status: 'completed', conclusion: 'failure', head_branch: 'build/49', display_title: 'Guard', event: 'pull_request', created_at: ago(1900000), run_started_at: ago(1900000), updated_at: ago(1899000), html_url: 'u', pull_requests: [{ number: 49 }] },
+  { id: 401, name: 'CI', status: 'completed', conclusion: 'success', head_branch: 'main', display_title: 'Merge 48', event: 'push', created_at: ago(3600000), run_started_at: ago(3600000), updated_at: ago(3400000), html_url: 'u', pull_requests: [] },
+] })
+const JOBS: Record<string, string> = {
+  '501': JSON.stringify({ jobs: [{ id: 9501, name: 'done', status: 'in_progress', conclusion: null, created_at: ago(300000), started_at: ago(240000), runner_name: 'mac-callflow-1-1791151244', labels: ['self-hosted', 'gcauc'], steps: [{ name: 'Set up job', status: 'completed', conclusion: 'success' }, { name: 'Run scripts/done --fast', status: 'in_progress', conclusion: null }] }] }),
+  '502': JSON.stringify({ jobs: [{ id: 9502, name: 'done', status: 'queued', conclusion: null, created_at: ago(300000), started_at: null, runner_name: null, labels: ['gcauc', 'linux'], steps: [] }] }),
+  '403': JSON.stringify({ jobs: [{ id: 9403, name: 'done', status: 'completed', conclusion: 'success', created_at: ago(900000), started_at: ago(890000), runner_name: 'mac-callflow-2-1', labels: ['self-hosted', 'gcauc'], steps: [{ name: 'Run scripts/done --fast', status: 'completed', conclusion: 'success' }] }] }),
+  '402': JSON.stringify({ jobs: [{ id: 9402, name: 'guard', status: 'completed', conclusion: 'failure', created_at: ago(1900000), started_at: ago(1900000), runner_name: null, labels: ['ubuntu-latest'], steps: [] }] }),
+  '401': JSON.stringify({ jobs: [{ id: 9401, name: 'done', status: 'completed', conclusion: 'success', created_at: ago(3600000), started_at: ago(3590000), runner_name: 'mac-callflow-1-1', labels: ['self-hosted', 'gcauc'], steps: [{ name: 'Run scripts/done --fast', status: 'completed', conclusion: 'success' }] }] }),
+}
+const RUNNERS = JSON.stringify({ runners: [
+  { name: 'mac-callflow-1-1791151244', status: 'online', busy: true, labels: [{ name: 'gcauc' }, { name: 'self-hosted' }, { name: 'Linux' }, { name: 'ARM64' }] },
+  { name: 'mac-callflow-2-1791150808', status: 'online', busy: false, labels: [{ name: 'gcauc' }, { name: 'self-hosted' }, { name: 'Linux' }, { name: 'ARM64' }] },
+] })
+const CHECK_PRS = JSON.stringify([
+  { number: 52, title: 'Inbox filters', url: 'https://github.com/garrettyarmo/callflow/pull/52', headRefName: 'build/52-inbox', mergeStateStatus: 'BLOCKED', statusCheckRollup: [
+    { __typename: 'CheckRun', name: 'guard', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: ago(600000) },
+    { __typename: 'CheckRun', name: 'guard', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: ago(100000) },
+    { __typename: 'CheckRun', name: 'done', status: 'IN_PROGRESS', conclusion: null, startedAt: ago(240000) },
+    { __typename: 'StatusContext', context: 'agent-review', state: 'PENDING' },
+  ] },
+])
+const REFUSAL = JSON.stringify([{ annotation_level: 'failure', message: "The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings" }])
 
 function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
   on('session.start', () => ({ cwd: '/home/code/callflow' }))
@@ -50,7 +82,22 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     const a = e.argv.join(' ')
     if (a.startsWith('gh') && world.ghFails) return { value: { exitCode: 1, stdout: '', stderr: 'HTTP 502' } }
     if (a.startsWith('gh issue list')) return { value: { exitCode: 0, stdout: ISSUES, stderr: '' } }
+    if (a.startsWith('gh pr list') && a.includes('statusCheckRollup')) return { value: { exitCode: 0, stdout: world.nastyTitle ? CHECK_PRS.replace('Inbox filters', 'Inbox\\u001b[31m filters') : CHECK_PRS, stderr: '' } }
     if (a.startsWith('gh pr list') && a.includes('--state open')) return { value: { exitCode: 0, stdout: '[]', stderr: '' } }
+    if (a.startsWith('gh api repos/garrettyarmo/callflow/actions/runs?')) return { value: { exitCode: 0, stdout: RUNS, stderr: '' } }
+    const jm = a.match(/^gh api repos\/garrettyarmo\/callflow\/actions\/runs\/(\d+)\/jobs/)
+    if (jm) return { value: { exitCode: 0, stdout: JOBS[jm[1]] || '{"jobs":[]}', stderr: '' } }
+    if (a.startsWith('gh api repos/garrettyarmo/callflow/actions/runners')) return { value: { exitCode: 0, stdout: RUNNERS, stderr: '' } }
+    if (a.startsWith('gh api repos/garrettyarmo/callflow/check-runs/9402/annotations')) return { value: { exitCode: 0, stdout: REFUSAL, stderr: '' } }
+    if (a.startsWith('sh -c out=') && a.endsWith('/actions/jobs/9403/logs')) {
+      world.logCalls += 1
+      if (world.logFailsOnce && world.logCalls === 1) return { value: { exitCode: 3, stdout: '', stderr: 'HTTP 404' } }
+      return { value: { exitCode: 0, stdout: 'done --fast: green in 127s\n', stderr: '' } }
+    }
+    if (a.startsWith('sh -c out=') && a.endsWith('/actions/jobs/9401/logs')) return { value: { exitCode: 0, stdout: 'done --fast: green in 151s\n', stderr: '' } }
+    if (a.startsWith('git -C /home/code/callflow merge-base --is-ancestor origin/main origin/build/52-inbox')) return { value: { exitCode: 1, stdout: '', stderr: '' } }
+    if (a.startsWith('limactl list gcauc-ci')) return { value: { exitCode: 0, stdout: 'Running\n', stderr: '' } }
+    if (a === 'gh api user --jq .login') return { value: { exitCode: 0, stdout: 'garrettyarmo\n', stderr: '' } }
     if (a.startsWith('gh pr list')) return { value: { exitCode: 0, stdout: JSON.stringify([{ number: 9, title: 'Fresh tree', mergedAt: 'x', url: 'p9' }]), stderr: '' } }
     if (a.startsWith('pgrep')) return { value: { exitCode: 0, stdout: '501 /Users/g/.local/bin/cursor-agent -p --model grok-4.7-high [ak:callflow#12:agent-review:2] review\n', stderr: '' } }
     if (a.startsWith('ps ')) return { value: { exitCode: 0, stdout: '  501    03:10\n', stderr: '' } }
@@ -59,33 +106,56 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     if (a.startsWith('git rev-parse --show-toplevel')) return { value: { exitCode: 0, stdout: e.init && e.init.cwd ? e.init.cwd + '\n' : '', stderr: '' } }
     return { value: { exitCode: 1, stdout: '', stderr: 'unexpected ' + a } }
   })
+  on('store.delete', ($, e) => {
+    saved.delete(e.key)
+    return { value: undefined }
+  })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['drawn by Claude Code'] }))
 }
+
+const BAND = { plugin: 'g-cauc', component: 'AbovePrompt', requestId: 'band', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 120, scroll: { offset: 0, bodyRows: 4 }, view: {} } } as const
 
 test('the board shows the phase, the running review, the queue and what needs Garrett', async ($, on) => {
   const saved = new Map<string, unknown>()
   const toasts: string[] = []
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, toasts)
-  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   await $.command.run({ command: 'board', args: '' })
   await clock.settle()
-  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(await ui.find({ key: 'row-callflow-12' })).toBeDefined()
-  expect(await ui.find({ type: 'Link', text: /#16 Spec 001 row 5/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /review r2/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /#16 Spec 001 row 5/ })).toBeDefined()
   await ui.press({ key: 'tab-lanes' })
-  expect(await ui.find({ type: 'Text', text: /codex.*out until/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /grok.*1\/6 jobs/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /out until 10-06 15:21/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^1\/6/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^42%/ })).toBeDefined()
   await ui.press({ key: 'tab-now' })
   await ui.press({ key: 'job-501' })
   await clock.settle()
   await ui.press({ key: 'tab-job' })
   expect(await ui.find({ type: 'Text', text: /› thinking/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /\$ scripts\/done --fast.*exit 0/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\$ scripts\/done --fast/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /exit 0 · 41s/ })).toBeDefined()
   await ui.press({ key: 'thinking' })
   expect(await ui.find({ type: 'Text', text: /Checking the deploy pin/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the Desktop app draws bars, pills, slots and dots as SVG on every tab', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  for (const t of ['plan', 'now', 'ci', 'lanes']) {
+    await ui.press({ key: 'tab-' + t })
+    expect(await ui.find({ type: 'Svg' })).toBeDefined()
+  }
   await ui.unmount()
 })
 
@@ -96,8 +166,42 @@ test('the board also draws in the terminal', async ($, on) => {
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('the CI tab shows the pool, running and stuck jobs, results, timings, PR checks and the refusal', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-ci' })
+  expect(await ui.find({ type: 'Text', text: /VM running/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /1 busy · 1 idle · 1 offline/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /GitHub refused jobs at the spending limit \(1 run\)/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /PR 52 · done/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /slot 1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Run scripts\/done --fast/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /stuck 5m/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /wants gcauc, linux · pool has gcauc, self-hosted, Linux, ARM64/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /2 of 3 passed/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /127s of 200s/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /avg 139s/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /✓ guard/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /… done/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /… agent-review/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /behind main/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /billing needs the gh "user" scope/ })).toBeDefined()
+  await ui.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /CI 1 running · 1 queued · pool 1\/3/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /1 stuck/ })).toBeDefined()
+  await band.unmount()
+  // Finished runs are read once: a second refresh fetches no job logs again
+  const logCalls = () => [...saved.keys()].filter((k) => k.startsWith('ci-run')).length
+  expect(logCalls()).toBe(3)
 })
 
 test('a failed gh call keeps the last good board and does not repeat alerts', async ($, on) => {
@@ -113,11 +217,11 @@ test('a failed gh call keeps the last good board and does not repeat alerts', as
   await $.command.run({ command: 'board', args: 'refresh' })
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /gh could not read garrettyarmo\/callflow/ })).toBeDefined()
   // A second failure in a row still shows the last good board
   await $.command.run({ command: 'board', args: 'refresh' })
-  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   // An unreadable projects.md changes nothing either
   world.ghFails = false
   world.projectsGone = true
@@ -143,10 +247,11 @@ test('a cold start with projects.md missing shows the last snapshot any session 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /Phase 1: Walking skeleton/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   await ui.press({ key: 'tab-lanes' })
-  expect(await ui.find({ type: 'Text', text: /codex.*0\/3 jobs.*out until/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^0\/3/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /out until/ })).toBeDefined()
   world.projectsGone = false
   await ui.unmount()
 })
@@ -212,4 +317,35 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   expect(settings.permissions.allow).toEqual(['Bash(gh pr view:*)'])
   expect((saved.get(key) as { state: string }).state).toBe('applied')
   await ui.unmount()
+})
+
+test('a job log GitHub has not finished uploading is read again on a later refresh', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.logFailsOnce = true
+  world.logCalls = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const k = 'ci-run\u0000garrettyarmo/callflow\u0000403'
+  expect((saved.get(k) as { retry?: boolean; fast: unknown }).retry).toBe(true)
+  await $.command.run({ command: 'board', args: 'refresh' })
+  expect((saved.get(k) as { fast: { seconds: number } }).fast.seconds).toBe(127)
+  world.logFailsOnce = false
+})
+
+test('a control character in a PR title is dropped, and the CI tab still draws on both surfaces', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.nastyTitle = true
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-ci' })
+    expect(await ui.find({ type: surface === 'desktop' ? 'Link' : 'Text', text: /#52 Inbox filters/ })).toBeDefined()
+    await ui.unmount()
+  }
+  world.nastyTitle = false
 })
