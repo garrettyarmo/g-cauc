@@ -56,11 +56,12 @@ sweep() {
   in_vm docker network prune -f --filter until=10m >/dev/null 2>&1 || true
 }
 
-# Drop this Mac's g-cauc runners that are offline (left over from a stopped serve).
-prune_offline() {
+# Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
+# registration still listed (even as online, until GitHub notices) has nothing behind it.
+prune_stale() {
   local repo="$1" id
   for id in $(gh api "repos/$repo/actions/runners?per_page=100" --jq \
-    ".runners[] | select(.status == \"offline\" and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null); do
+    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null); do
     gh api -X DELETE "repos/$repo/actions/runners/$id" >/dev/null 2>&1 || true
   done
 }
@@ -99,7 +100,7 @@ cmd_serve() {
   gid="$(in_vm stat -c %g /var/run/docker.sock)"
   in_vm sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' >/dev/null 2>&1 || true
   while read -r repo slots; do
-    prune_offline "$repo"
+    prune_stale "$repo"
     for n in $(seq 1 "$slots"); do
       slot "$repo" "$n" "$gid" &
       pids+=($!)
