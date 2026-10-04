@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, latestChecks, summarizeCi, ciBand } from '../hooks/ci.js'
+import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, latestChecks, summarizeCi, ciBand, slotStates } from '../hooks/ci.js'
 
 test('done timing lines: green and over budget', async () => {
   const t = doneTimings('x\ndone --fast: green in 127s\n\ndone --full: 1620s is over the 1500s budget\nnoise')
@@ -69,4 +69,32 @@ test('review fixes: an unfinished re-run is running, waiting jobs are never stuc
   const pr = { number: 7, title: 't', url: 'u', mergeStateStatus: 'BLOCKED', statusCheckRollup: [] }
   expect(summarizeCi({ runs: [], jobs: [], runners: [], slots: 0, prs: [pr], facts: {}, budgets: null, now, behind: { 7: true } }).prs[0].behind).toBe(true)
   expect(summarizeCi({ runs: [], jobs: [], runners: [], slots: 0, prs: [pr], facts: {}, budgets: null, now }).prs[0].behind).toBe(false)
+})
+
+test('the pool counts slots, not registrations: two runners on one slot are one busy slot', async () => {
+  const reg = (name, slot, busy, status = 'online') => ({ name, status, busy, labels: ['gcauc'], slot })
+  const runners = [reg('m-callflow-1-1', 1, true), reg('m-callflow-1-2', 1, false), reg('m-callflow-2-1', 2, false), reg('m-callflow-4-1', 4, true)]
+  expect(slotStates(runners, 3)).toEqual(['busy', 'idle', 'offline', 'busy'])
+  const c = summarizeCi({ runs: [], jobs: [{ id: 1, name: 'done', status: 'in_progress', startedAt: '2026-10-04T11:59:00Z', runner: 'm-callflow-1-1', labels: [], prs: [1], branch: 'b', steps: [] }], runners, slots: 3, prs: [], facts: {}, budgets: null, now: Date.parse('2026-10-04T12:00:00Z') })
+  expect(c.pool).toMatchObject({ busy: 2, idle: 1, offline: 1 })
+  expect(ciBand([{ ci: c }]).text).toBe('CI 1 running · pool 2/4')
+})
+
+test('review round 1: stuck reads slots, not registrations, and every runner shows up', async () => {
+  const now = Date.parse('2026-10-04T12:00:00Z')
+  const queued = { id: 1, name: 'done', status: 'queued', createdAt: '2026-10-04T11:55:00Z', labels: ['gcauc'], prs: [1], branch: 'b', steps: [] }
+  const reg = (name, slot, busy, status = 'online') => ({ name, status, busy, labels: ['gcauc'], slot })
+  const ci = (runners, slots) => summarizeCi({ runs: [], jobs: [queued], runners, slots, prs: [], facts: {}, budgets: null, now })
+  // The only slot is busy, though one of its two registrations is idle
+  const oneSlot = ci([reg('m-1-1', 1, true), reg('m-1-2', 1, false)], 1)
+  expect(oneSlot.pool).toMatchObject({ slots: ['busy'], idle: 0 })
+  expect(oneSlot.stuck).toBe(0)
+  // An idle runner past the configured count, or with no slot number, is an idle slot the board shows
+  expect(ci([reg('m-1-1', 1, true), reg('m-4-1', 4, false)], 3).pool.slots).toEqual(['busy', 'offline', 'offline', 'idle'])
+  expect(ci([reg('plain', null, false)], 3).pool.slots).toEqual(['offline', 'offline', 'offline', 'idle'])
+  expect(ci([reg('plain', null, false)], 3).stuck).toBe(1)
+  // A configured count of 0 still shows the runners that exist
+  expect(ci([reg('m-callflow-1-9', 1, true)], 0).pool.slots).toEqual(['busy'])
+  expect(ci([reg('m-1-1', 1, false)], 0).stuck).toBe(1)
+  expect(ci([], 0).pool.slots).toEqual([])
 })
