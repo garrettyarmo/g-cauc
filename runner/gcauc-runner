@@ -20,6 +20,8 @@ plist="$HOME/Library/LaunchAgents/com.gcauc.runner.plist"
 version="$(sed -n 's#^FROM ghcr.io/actions/actions-runner:##p' "$here/image/Dockerfile")"
 image="gcauc-runner:$version"
 host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+# A just-in-time runner gets only the labels it is given, so name the defaults GitHub would add.
+case "$(uname -m)" in arm64 | aarch64) arch=ARM64 ;; *) arch=X64 ;; esac
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 in_vm() { limactl shell --workdir / "$vm" -- "$@"; }
@@ -70,7 +72,8 @@ slot() {
   while true; do
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
-      -f name="$name" -F runner_group_id=1 -f "labels[]=$label" -f work_folder="$work" \
+      -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
+      -f "labels[]=self-hosted" -f "labels[]=Linux" -f "labels[]=$arch" -f "labels[]=$label" \
       --jq .encoded_jit_config 2>/dev/null)"; then
       log "$repo slot $n: could not mint a runner config; retrying in 60 s"
       sleep 60
