@@ -24,7 +24,7 @@ Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 | `routing.md` | Which model for which job, the fallback order when a lane is out, and the cross-family rule. |
 | `projects.md` | The projects the product pass and foreman serve, in priority order. |
 | `tasks/` | The instructions for the three Desktop scheduled tasks: product pass, foreman, 7am digest. |
-| `hooks/` | The mod: `/board` (milestone, running jobs with their thinking and commands, lanes), the quiet line above the prompt, and the permission advisor. Tests in `tests/`. |
+| `hooks/` | The mod: `/board` (Plan, Now, CI, Lanes, Allow and a job view with each worker's thinking and commands), the quiet line above the prompt, and the permission advisor. On the Desktop app it draws bars, pills, pool slots and result dots as SVG; in a terminal, colored text. Tests in `tests/`. |
 | `.claude-plugin/` | The plugin and marketplace manifests, so Claude Code installs all of this as one plugin. |
 | `scripts/install.sh` | Links every skill into `~/.codex/skills` for Codex. Claude gets them from the plugin. |
 | `scripts/labels.sh` | Creates or updates the label set on a repo. |
@@ -75,14 +75,14 @@ Other labels: `spec` (spec PRs), `from-review` (advisory findings, batched into 
 Claude Code (the skills, `/board` and the permission advisor), once:
 
 ```bash
-claude plugin marketplace add ~/code/g-cauc
+claude plugin marketplace add garrettyarmo/g-cauc
 ```
 
 ```bash
 claude plugin install g-cauc@g-cauc
 ```
 
-After changing the kit, bump `version` in `.claude-plugin/plugin.json`, then `claude plugin update g-cauc@g-cauc` and `/reload-plugins` in open sessions. While working on the mod itself, load the folder directly with `claude --plugin-dir ~/code/g-cauc` and run `claude plugin test` in it.
+Install from GitHub, not from the local folder: the local folder may be on a feature branch, and the installed plugin would follow it. After a change lands on main, bump `version` in `.claude-plugin/plugin.json`, then `claude plugin marketplace update g-cauc`, `claude plugin update g-cauc@g-cauc` and `/reload-plugins` in open sessions. While working on the mod itself, load the folder directly with `claude --plugin-dir ~/code/g-cauc` and run `claude plugin test` in it.
 
 Codex reads the same skills through links:
 
