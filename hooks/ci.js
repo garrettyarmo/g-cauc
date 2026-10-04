@@ -152,22 +152,27 @@ const KEY_CHECKS = ['done', 'agent-review', 'guard']
 // One state per pool slot. A slot can hold more than one registration at a
 // time (each job gets a fresh one-job runner), so a slot is busy when any of
 // its registrations is busy, idle when one is online, and offline otherwise.
+// Slots run from 1 to the configured count, or higher when a runner sits on a
+// higher slot; a runner whose name carries no slot number is a slot of its own.
 export function slotStates(runners, configured) {
   const bySlot = new Map()
-  for (const r of runners) if (r.slot) bySlot.set(r.slot, [...(bySlot.get(r.slot) || []), r])
-  const total = configured ?? Math.max(0, ...bySlot.keys())
-  const states = []
-  for (let n = 1; n <= total; n++) {
-    const regs = bySlot.get(n) || []
-    states.push(regs.some((r) => r.busy) ? 'busy' : regs.some((r) => r.status === 'online') ? 'idle' : 'offline')
+  const loose = []
+  for (const r of runners) {
+    if (r.slot) bySlot.set(r.slot, [...(bySlot.get(r.slot) || []), r])
+    else loose.push([r])
   }
-  return states
+  const total = Math.max(configured || 0, ...bySlot.keys(), 0)
+  const groups = []
+  for (let n = 1; n <= total; n++) groups.push(bySlot.get(n) || [])
+  groups.push(...loose)
+  return groups.map((regs) => (regs.some((r) => r.busy) ? 'busy' : regs.some((r) => r.status === 'online') ? 'idle' : 'offline'))
 }
 
 // Everything the CI tab shows for one project.
 export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, now, behind }) {
   const pool = (runners || []).filter((r) => r.labels.includes('gcauc'))
-  const idle = pool.filter((r) => r.status === 'online' && !r.busy)
+  const states = slotStates(pool, slots ?? null)
+  const idleSlot = states.includes('idle')
   const poolLabels = [...new Set(pool.flatMap((r) => r.labels))]
   const live = (jobs || []).filter((j) => ACTIVE.has(j.status))
   const running = live
@@ -180,7 +185,7 @@ export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, n
     .filter((j) => j.status !== 'in_progress')
     .map((j) => {
       const wait = secs(j.createdAt, new Date(now).toISOString()) || 0
-      return { ...j, wait, stuck: j.status === 'queued' && wait > 120 && idle.length > 0 }
+      return { ...j, wait, stuck: j.status === 'queued' && wait > 120 && idleSlot }
     })
   const completed = (runs || []).filter((r) => r.status === 'completed').slice(0, 20)
   const recent = completed.map((r) => ({ id: r.id, conclusion: r.conclusion, seconds: secs(r.startedAt, r.updatedAt), title: r.title, workflow: r.workflow }))
@@ -205,7 +210,6 @@ export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, n
     const known = behind ? behind[p.number] : undefined
     return { number: p.number, title: p.title || '', url: p.url || '', behind: typeof known === 'boolean' ? known : p.mergeStateStatus === 'BEHIND', checks: shown }
   })
-  const states = slotStates(pool, slots ?? null)
   return {
     pool: { configured: slots ?? null, slots: states, busy: states.filter((s) => s === 'busy').length, idle: states.filter((s) => s === 'idle').length, offline: states.filter((s) => s === 'offline').length, labels: poolLabels, runners: pool },
     running,

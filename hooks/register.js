@@ -13,6 +13,9 @@ import { colored, progress, pill, slots, dots, budgetTone } from './draw.js'
 
 const PANE = 'g-cauc-board'
 const STALE_MS = 45_000
+// The CI snapshot's store key names its shape, so a session never reads a
+// snapshot an older version of the board wrote.
+const CI_SNAPSHOT = 'ci-snapshot-2'
 const APPROVALS_TO_SUGGEST = 10
 
 let home = ''
@@ -188,12 +191,12 @@ async function refresh($, force) {
     }
     jobs = await gatherJobs($)
     recent = await gatherRecent($)
-    const ciCached = await $.store.get('ci-snapshot')
+    const ciCached = await $.store.get(CI_SNAPSHOT)
     if (!force && ciCached && Date.now() - ciCached.at < STALE_MS) {
       ci = ciCached
     } else {
       ci = await gatherCi($, ciCached)
-      await $.store.set('ci-snapshot', ci)
+      await $.store.set(CI_SNAPSHOT, ci)
     }
     lanes = await withLaneState($, lanes)
     allow = await loadAllow($)

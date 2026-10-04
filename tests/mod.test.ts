@@ -233,6 +233,25 @@ test('a failed gh call keeps the last good board and does not repeat alerts', as
   await ui.unmount()
 })
 
+test('a CI snapshot an older board saved is never read back', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  // The 0.4.0 shape: a pool with no slots list
+  saved.set('ci-snapshot', { at: Date.now(), vm: 'Running', billing: null, projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', key: 'callflow', ci: { running: [{ id: 1, name: 'done', prs: [1], branch: 'b', elapsed: 5, steps: [] }], queued: [], stuck: 0, recent: [], timings: { fast: [], full: [], budgets: { fast: null, full: null } }, refusal: null, prs: [], pool: { busy: 1, configured: 3, runners: [] } } }] })
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.ghFails = true
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab-ci' })
+  expect(await ui.find({ type: 'Text', text: /gh could not read the Actions runs/ })).toBeDefined()
+  await ui.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /CI 1 running/ })).toBeUndefined()
+  await band.unmount()
+  world.ghFails = false
+})
+
 test('a cold start with projects.md missing shows the last snapshot any session saved', async ($, on) => {
   const saved = new Map<string, unknown>()
   saved.set('snapshot', {
