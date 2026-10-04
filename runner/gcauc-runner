@@ -1,0 +1,177 @@
+#!/bin/bash
+# gcauc-runner: the g-cauc CI runner pool on this Mac (see runner/README.md).
+#   gcauc-runner up         create or start the runner VM and build the job image
+#   gcauc-runner serve      keep the slots in runner/repos registered and running jobs (foreground)
+#   gcauc-runner status     the VM, the running job containers, and each repo's g-cauc runners
+#   gcauc-runner rebuild    rebuild the job image from runner/image/Dockerfile
+#   gcauc-runner install    run `serve` at login and keep it running (a launchd agent)
+#   gcauc-runner uninstall  remove that agent and stop serving
+# Each job runs in a fresh container registered with a one-job (just-in-time) runner config.
+# The config is minted here, with this Mac's gh login, so no reusable GitHub credential ever
+# enters the VM.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+vm="${GCAUC_RUNNER_VM:-gcauc-ci}"
+label=gcauc
+repos_file="$here/repos"
+logdir="$HOME/Library/Logs/gcauc-runner"
+plist="$HOME/Library/LaunchAgents/com.gcauc.runner.plist"
+version="$(sed -n 's#^FROM ghcr.io/actions/actions-runner:##p' "$here/image/Dockerfile")"
+image="gcauc-runner:$version"
+host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+# A just-in-time runner gets only the labels it is given, so name the defaults GitHub would add.
+case "$(uname -m)" in arm64 | aarch64) arch=ARM64 ;; *) arch=X64 ;; esac
+
+log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
+in_vm() { limactl shell --workdir / "$vm" -- "$@"; }
+
+repos() { grep -vE '^[[:space:]]*(#|$)' "$repos_file"; }
+
+cmd_up() {
+  if ! limactl list -q 2>/dev/null | grep -qx "$vm"; then
+    limactl create --name "$vm" --tty=false "$here/lima.yaml"
+  fi
+  if [ "$(limactl list "$vm" --format '{{.Status}}')" != Running ]; then
+    limactl start "$vm" --tty=false
+  fi
+  # A VM that can see the Mac's files would let any job read ~/.config, ~/.aws or ~/.ssh.
+  if [ "$(limactl list "$vm" --format '{{len .Config.Mounts}}')" != 0 ]; then
+    echo "gcauc-runner: $vm mounts host directories; delete it (limactl delete -f $vm) and run up again" >&2
+    exit 1
+  fi
+  in_vm docker image inspect "$image" >/dev/null 2>&1 || cmd_rebuild
+}
+
+cmd_rebuild() {
+  in_vm docker build -q -t "$image" - <"$here/image/Dockerfile"
+}
+
+# Remove what a slot's job left in the VM's Docker: compose projects under its work folder.
+sweep() {
+  local dir="$1"
+  in_vm sh -c "docker ps -aq --filter label=com.docker.compose.project.working_dir \
+    | xargs -r docker inspect --format '{{.Id}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}' \
+    | awk -v d='$dir' 'index(\$2, d) == 1 { print \$1 }' | xargs -r docker rm -fv" >/dev/null 2>&1 || true
+  in_vm docker network prune -f --filter until=10m >/dev/null 2>&1 || true
+}
+
+# Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
+# registration still listed (even as online, until GitHub notices) has nothing behind it.
+prune_stale() {
+  local repo="$1" id
+  for id in $(gh api "repos/$repo/actions/runners?per_page=100" --jq \
+    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null); do
+    gh api -X DELETE "repos/$repo/actions/runners/$id" >/dev/null 2>&1 || true
+  done
+}
+
+slot() {
+  local repo="$1" n="$2" gid="$3" cpuset="$4"
+  local short="${repo##*/}"
+  # Per repo and slot: the sweep below removes everything under this folder, so two repos'
+  # slot 1 must never share it (a bisonbrain job's sweep once removed a CallFlow job's Postgres).
+  local work="_work-$short-$n" name jit status
+  while true; do
+    name="$host-$short-$n-$(date +%s)"
+    if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
+      -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
+      -f "labels[]=self-hosted" -f "labels[]=Linux" -f "labels[]=$arch" -f "labels[]=$label" \
+      --jq .encoded_jit_config 2>/dev/null)"; then
+      log "$repo slot $n: could not mint a runner config; retrying in 60 s"
+      sleep 60
+      continue
+    fi
+    log "$repo slot $n: $name is waiting for a job"
+    status=0
+    # The config goes in on stdin, so it never appears in this Mac's process list.
+    printf '%s\n' "$jit" | in_vm docker run --rm -i --name "gcauc-$short-$n" --network host \
+      --cpuset-cpus "$cpuset" \
+      --group-add "$gid" -v /var/run/docker.sock:/var/run/docker.sock \
+      --entrypoint bash "$image" -c 'read -r JIT; exec ./run.sh --jitconfig "$JIT"' \
+      >>"$logdir/$short-$n.log" 2>&1 || status=$?
+    sweep "/home/runner/$work/"
+    log "$repo slot $n: $name finished (exit $status)"
+    [ "$status" -eq 0 ] || sleep 10
+  done
+}
+
+cmd_serve() {
+  mkdir -p "$logdir"
+  cmd_up
+  local gid repo slots n pids=() cpus total=0 per windows g=0
+  gid="$(in_vm stat -c %g /var/run/docker.sock)"
+  # Each slot gets its own CPUs, so a job sees (and sizes its test workers to) its share
+  # instead of every job starting one worker per VM CPU.
+  cpus="$(in_vm nproc)"
+  while read -r repo slots; do total=$((total + slots)); done < <(repos)
+  # At least GCAUC_SLOT_CPUS (6) per slot; when slots outnumber the CPU windows, they share a
+  # window, which is fine because most slots of a quiet repo sit idle.
+  per=$((cpus / total))
+  [ "$per" -ge "${GCAUC_SLOT_CPUS:-6}" ] || per="${GCAUC_SLOT_CPUS:-6}"
+  [ "$per" -le "$cpus" ] || per="$cpus"
+  windows=$((cpus / per))
+  in_vm sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' >/dev/null 2>&1 || true
+  while read -r repo slots; do
+    prune_stale "$repo"
+    for n in $(seq 1 "$slots"); do
+      slot "$repo" "$n" "$gid" "$(((g % windows) * per))-$(((g % windows) * per + per - 1))" &
+      g=$((g + 1))
+      pids+=($!)
+    done
+  done < <(repos)
+  trap 'kill "${pids[@]}" 2>/dev/null; in_vm sh -c "docker ps -q --filter name=^gcauc- | xargs -r docker rm -f" >/dev/null 2>&1; exit 0' TERM INT
+  log "serving ${#pids[@]} slots"
+  wait
+}
+
+cmd_status() {
+  limactl list "$vm" --format '{{.Name}} {{.Status}} cpus={{.CPUs}} memory={{.Memory}} mounts={{len .Config.Mounts}}' 2>/dev/null || echo "$vm: not created"
+  in_vm docker ps --filter name=^gcauc- --format '{{.Names}} {{.Status}}' 2>/dev/null || true
+  local repo slots
+  while read -r repo slots; do
+    echo "$repo ($slots slots):"
+    gh api "repos/$repo/actions/runners?per_page=100" --jq \
+      ".runners[] | select([.labels[].name] | index(\"$label\")) | \"  \(.name) \(.status) busy=\(.busy)\""
+  done < <(repos)
+  if launchctl print "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1; then echo "launchd: com.gcauc.runner loaded"; else echo "launchd: not installed"; fi
+}
+
+cmd_install() {
+  mkdir -p "$logdir" "$(dirname "$plist")"
+  cat >"$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.gcauc.runner</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>$here/gcauc-runner</string><string>serve</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$logdir/serve.log</string>
+  <key>StandardErrorPath</key><string>$logdir/serve.log</string>
+</dict>
+</plist>
+EOF
+  launchctl bootout "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  echo "installed: $plist (log: $logdir/serve.log)"
+}
+
+cmd_uninstall() {
+  launchctl bootout "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1 || true
+  rm -f "$plist"
+  in_vm sh -c 'docker ps -q --filter name=^gcauc- | xargs -r docker rm -f' >/dev/null 2>&1 || true
+  echo "uninstalled"
+}
+
+case "${1:-}" in
+  up) cmd_up ;;
+  serve) cmd_serve ;;
+  status) cmd_status ;;
+  rebuild) cmd_rebuild ;;
+  install) cmd_install ;;
+  uninstall) cmd_uninstall ;;
+  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+esac
