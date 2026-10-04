@@ -1,4 +1,5 @@
 # Repositories the g-cauc runner pool serves: owner/repo and how many jobs it runs at once.
 # Add a line when a project adopts g-cauc (the adopt skill); `gcauc-runner install` picks it up
 # on its next restart (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
-garrettyarmo/callflow 3
+garrettyarmo/callflow 2
+garrettyarmo/bisonbrain 2
