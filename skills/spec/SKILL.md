@@ -32,7 +32,7 @@ While this session drives builds itself during the attended phase, it should run
 
 1. Read the idea, AGENTS.md, related specs, DECISIONS.md and the code it touches.
 2. Interview in batches of at most five questions, each with a default. Name the gaps Garrett did not mention: errors, empty states, permissions, data migration, cost, abuse, observability.
-3. Write the spec from `~/code/g-cauc/templates/spec.md`.
+3. Write the spec from `~/code/g-cauc/templates/spec.md`, in Simplified Technical English by `~/code/g-cauc/writing.md`, and run its check on the file.
 
 ## What makes a spec buildable unattended
 

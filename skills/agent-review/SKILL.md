@@ -24,6 +24,8 @@ You did not write this code and your model family has no commit on this branch. 
 
 ## Report
 
+Write the findings, the advisory items and the follow-ups by `~/code/g-cauc/writing.md` (Simplified Technical English). Repro commands and output stay exactly as they ran.
+
 1. Comment on the PR:
 
    ```

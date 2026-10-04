@@ -26,7 +26,7 @@ Read, in the repo: AGENTS.md, DECISIONS.md, `specs/000-foundation.md` and ROADMA
 
 ## Output
 
-Print exactly this, and nothing before it:
+Write the summary, the changes, the suggestions and the escalation by `~/code/g-cauc/writing.md` (Simplified Technical English). Print exactly this, and nothing before it:
 
 ```
 VERDICT: AGREE | CHANGES | ESCALATE

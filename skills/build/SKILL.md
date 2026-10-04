@@ -36,6 +36,8 @@ If your sandbox cannot reach GitHub during a fix round, commit, write what chang
 
 ## PR body
 
+Write the PR body, `AK_FIX.md` and each commit message body by `~/code/g-cauc/writing.md` (Simplified Technical English), and run its check on the body file before you open the PR.
+
 ```
 Closes #<N> · Spec: specs/<NNN-slug>.md
 

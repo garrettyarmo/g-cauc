@@ -22,6 +22,8 @@ Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 | `templates/` | The AGENTS.md outline, CLAUDE.md, the spec format, the label set. |
 | `lanes.md` | The lanes (CLI, model, subscription), how many jobs each may run at once, launch commands, and how to tell a lane is out. |
 | `routing.md` | Which model for which job, the fallback order when a lane is out, and the cross-family rule. |
+| `writing.md` | How agents write for people: the part of Simplified Technical English (ASD-STE100) that g-cauc uses, and the check to run before posting. |
+| `vendor/simplified-technical-english/` | The full STE rules, word list and check tool, copied from github.com/0xpili/simplified-technical-english (MIT; the word list belongs to ASD, see its NOTICE.md). |
 | `projects.md` | The projects the product pass and foreman serve, in priority order. |
 | `tasks/` | The instructions for the three Desktop scheduled tasks: product pass, foreman, 7am digest. |
 | `hooks/` | The mod: `/board` (Plan, Now, CI, Lanes, Allow and a job view with each worker's thinking and commands), the quiet line above the prompt, and the permission advisor. On the Desktop app it draws bars, pills, pool slots and result dots as SVG; in a terminal, colored text. Tests in `tests/`. |
