@@ -69,7 +69,9 @@ prune_stale() {
 slot() {
   local repo="$1" n="$2" gid="$3" cpuset="$4"
   local short="${repo##*/}"
-  local work="_work-$n" name jit status
+  # Per repo and slot: the sweep below removes everything under this folder, so two repos'
+  # slot 1 must never share it (a bisonbrain job's sweep once removed a CallFlow job's Postgres).
+  local work="_work-$short-$n" name jit status
   while true; do
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \

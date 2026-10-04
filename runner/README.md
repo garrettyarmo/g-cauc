@@ -19,7 +19,7 @@ gcauc-runner serve                        one fresh container per job, from gcau
 - `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `rebuild`, `install`, `uninstall`).
 - `runner/repos`: which repositories it serves and how many jobs each runs at once.
 
-Each slot has its own work folder (`/home/runner/_work-<n>`), so `scripts/dev`'s path-derived ports and compose project names never collide between concurrent jobs.
+Each repo's slot has its own work folder (`/home/runner/_work-<repo>-<n>`), so `scripts/dev`'s path-derived ports and compose project names never collide between concurrent jobs, and a slot's cleanup after its job removes only what that slot started.
 
 ## Security model
 
