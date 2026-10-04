@@ -1,0 +1,48 @@
+# The g-cauc runner VM: a Linux machine on the Mac that runs CI jobs in throwaway containers.
+# No host mounts (jobs never see ~/.config, ~/.aws, ~/.ssh), no port forwarding to the Mac
+# (job services never collide with a worktree's dev ports), no SSH agent forwarding.
+minimumLimaVersion: 2.0.0
+base:
+- template:_images/ubuntu-24.04
+vmType: vz
+cpus: 12
+memory: 32GiB
+disk: 150GiB
+mounts: []
+ssh:
+  forwardAgent: false
+  loadDotSSHPubKeys: false
+portForwards:
+- guestPortRange: [1, 65535]
+  guestIP: 0.0.0.0
+  ignore: true
+- guestPortRange: [1, 65535]
+  guestIP: 127.0.0.1
+  ignore: true
+containerd:
+  system: false
+  user: false
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    export DEBIAN_FRONTEND=noninteractive
+    if ! command -v docker >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y --no-install-recommends docker.io docker-compose-v2 docker-buildx
+    fi
+    # Wide address pools: every job's compose project gets its own network.
+    mkdir -p /etc/docker
+    cat >/etc/docker/daemon.json <<'JSON'
+    {"default-address-pools": [{"base": "10.200.0.0/14", "size": 24}], "log-driver": "local"}
+    JSON
+    usermod -aG docker "{{.User}}"
+    systemctl enable docker
+    systemctl restart docker
+probes:
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    timeout 120s bash -c 'until sudo docker info >/dev/null 2>&1; do sleep 3; done'
+  hint: See /var/log/cloud-init-output.log in the guest
