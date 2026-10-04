@@ -50,3 +50,5 @@ Two or three sentences: the product, who uses it, and the one thing it must neve
 ## Writing
 
 No em or en dashes anywhere. Never hard-wrap markdown: one physical line per paragraph, list item and table row.
+
+Text a person reads (README, `docs/`, specs, PR bodies, commit message bodies, comments) is in Simplified Technical English: follow `~/code/g-cauc/writing.md` and run its check.

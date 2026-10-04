@@ -56,7 +56,7 @@ Use the commands in `lanes.md` for the chosen lane. The prompt is the marker, th
 
 ## Park
 
-Label the issue `needs:garrett`, drop `building` and `in-review`, and comment: what failed, the exact failing command or finding, the rounds tried, and one question with a default ("Default if no answer by tomorrow: ..."). Then move on. A parked issue never stops the rest of the queue.
+Label the issue `needs:garrett`, drop `building` and `in-review`, and comment: what failed, the exact failing command or finding, the rounds tried, and one question with a default ("Default if no answer by tomorrow: ..."), written by `~/code/g-cauc/writing.md`. Then move on. A parked issue never stops the rest of the queue.
 
 ## Finish
 

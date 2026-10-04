@@ -242,14 +242,14 @@ async function specFiles($, path) {
 
 async function gatherProjects($, cached) {
   const list = parseProjects(await readText($, kitDir + '/projects.md'), home)
-  if (list.length === 0) throw new Error('could not read any project from ' + kitDir.replace(home, '~') + '/projects.md; showing the last good data')
+  if (list.length === 0) throw new Error('could not read any project from ' + kitDir.replace(home, '~') + '/projects.md. The board shows the last good data.')
   const out = []
   for (const p of list) {
     try {
       const issues = asArray(await sh($, ['gh', 'issue', 'list', '--repo', p.repo, '--state', 'all', '--limit', '300', '--json', 'number,title,state,labels,body,url']))
       const openPrs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '50', '--json', 'number,title,labels,url,headRefName']))
       const mergedPrs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'merged', '--limit', '6', '--json', 'number,title,mergedAt,url']))
-      if (!issues || !openPrs || !mergedPrs) throw new Error('gh could not read ' + p.repo + '; showing the last good data')
+      if (!issues || !openPrs || !mergedPrs) throw new Error('gh could not read ' + p.repo + '. The board shows the last good data.')
       const roadmap = await readMain($, p.path, 'ROADMAP.md')
       const agents = await readMain($, p.path, 'AGENTS.md')
       const specs = []
@@ -355,7 +355,7 @@ async function gatherCi($, cached) {
     try {
       if (!repoOk(p.repo)) throw new Error('not a GitHub repo name: ' + p.repo)
       const runs = parseRuns(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runs?per_page=40`]))
-      if (!runs) throw new Error('gh could not read the Actions runs of ' + p.repo + '; showing the last good data')
+      if (!runs) throw new Error('gh could not read the Actions runs of ' + p.repo + '. The board shows the last good data.')
       const liveJobs = []
       for (const r of runs.filter((x) => x.status !== 'completed').slice(0, 8)) {
         liveJobs.push(...(parseRunJobs(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=50`]), r) || []))
@@ -466,7 +466,7 @@ async function countApproval($, ask) {
     r.count += 1
     if (r.state === 'counting' && r.count >= APPROVALS_TO_SUGGEST) {
       r.state = 'suggested'
-      $.ui.toast(`g-cauc: you approved ${rule} ${r.count} times. /board → Allow to stop being asked.`)
+      $.ui.toast(`g-cauc: you approved ${rule} ${r.count} times. To stop the prompts for it, open /board → Allow.`)
     }
     await $.store.set(key, r)
   }
@@ -482,13 +482,13 @@ async function decideRule($, root, rule, verdict) {
       try {
         current = JSON.parse(String(await $.fs.read(path)))
       } catch {
-        $.ui.toast('g-cauc: .claude/settings.json is not valid JSON, so nothing was changed')
+        $.ui.toast('g-cauc: .claude/settings.json is not valid JSON. The board did not change it.')
         return
       }
     }
     const next = withAllowed(current, [rule])
     if (!next) {
-      $.ui.toast('g-cauc: .claude/settings.json has a permissions shape I will not edit by hand, so nothing was changed')
+      $.ui.toast('g-cauc: .claude/settings.json has a permissions shape that the board does not edit. The board did not change it.')
       return
     }
     await $.fs.write(path, JSON.stringify(next, null, 2) + '\n')
