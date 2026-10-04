@@ -53,3 +53,20 @@ test('a quiet CI says nothing on the quiet line; a stuck job is only stuck with 
   expect(ciBand([{ ci: quiet }])).toBe(null)
   expect(ciBand([{ ci: idlePool }])).toEqual({ text: 'CI 0 running · 1 queued · pool 0/1', alert: '1 stuck' })
 })
+
+test('review fixes: an unfinished re-run is running, waiting jobs are never stuck, labels are always a list, git decides behind', async () => {
+  const queuedRerun = { __typename: 'CheckRun', name: 'done', status: 'QUEUED', conclusion: null, startedAt: null, completedAt: null }
+  const oldFail = { __typename: 'CheckRun', name: 'done', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: '2026-10-04T10:00:00Z' }
+  expect(latestChecks([oldFail, queuedRerun])).toEqual({ done: 'running' })
+  expect(latestChecks([queuedRerun, oldFail])).toEqual({ done: 'running' })
+  const now = Date.parse('2026-10-04T12:00:00Z')
+  const idle = [{ name: 'a-1-1', status: 'online', busy: false, labels: ['gcauc'], slot: 1 }]
+  const waiting = { id: 2, name: 'deploy', status: 'waiting', createdAt: '2026-10-04T11:50:00Z', labels: ['gcauc'], prs: [], branch: 'main', steps: [] }
+  const pending = { ...waiting, id: 3, status: 'pending' }
+  expect(summarizeCi({ runs: [], jobs: [waiting, pending], runners: idle, slots: 1, prs: [], facts: {}, budgets: null, now }).stuck).toBe(0)
+  const jobs = parseRunJobs(JSON.stringify({ jobs: [{ id: 1, name: 'done', status: 'queued', created_at: '2026-10-04T11:50:00Z', labels: 'gcauc', steps: [] }] }), null)
+  expect(jobs[0].labels).toEqual(['gcauc'])
+  const pr = { number: 7, title: 't', url: 'u', mergeStateStatus: 'BLOCKED', statusCheckRollup: [] }
+  expect(summarizeCi({ runs: [], jobs: [], runners: [], slots: 0, prs: [pr], facts: {}, budgets: null, now, behind: { 7: true } }).prs[0].behind).toBe(true)
+  expect(summarizeCi({ runs: [], jobs: [], runners: [], slots: 0, prs: [pr], facts: {}, budgets: null, now }).prs[0].behind).toBe(false)
+})

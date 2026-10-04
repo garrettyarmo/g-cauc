@@ -334,8 +334,10 @@ async function runFacts($, repo, run) {
       if (msg) facts.refused = msg
     }
     if (j.name === 'done' && j.steps.length && repoOk(repo)) {
-      const lines = (await sh($, ['sh', '-c', `gh api repos/${repo}/actions/jobs/${Number(j.id)}/logs | grep -E 'done --(fast|full): ' | tail -4`])) || ''
-      for (const t of doneTimings(lines)) facts[t.mode] = t
+      // The job's log path is an argument, not part of the script, and a failed gh call exits 3.
+      const lines = await sh($, ['sh', '-c', 'out=$(gh api "$1") || exit 3; printf "%s\\n" "$out" | grep -E "done --(fast|full): " | tail -4; exit 0', 'sh', `repos/${repo}/actions/jobs/${Number(j.id)}/logs`])
+      if (lines === null) facts.retry = true
+      for (const t of doneTimings(lines || '')) facts[t.mode] = t
     }
   }
   return facts
@@ -356,7 +358,19 @@ async function gatherCi($, cached) {
         liveJobs.push(...(parseRunJobs(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=50`]), r) || []))
       }
       const runners = parseRunners(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runners?per_page=100`])) || []
-      const prs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '30', '--json', 'number,title,url,mergeStateStatus,statusCheckRollup'])) || []
+      const prs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '30', '--json', 'number,title,url,headRefName,mergeStateStatus,statusCheckRollup'])) || []
+      // GitHub's single merge state hides BEHIND under BLOCKED, so ask git whether the head contains main.
+      const behind = {}
+      for (const pr of prs.slice(0, 30)) {
+        if (!/^[\w./-]+$/.test(String(pr.headRefName || ''))) continue
+        try {
+          const r = await $.process.run(['git', '-C', p.path, 'merge-base', '--is-ancestor', 'origin/main', 'origin/' + pr.headRefName], { timeoutMs: 10_000 })
+          if (r.exitCode === 0) behind[pr.number] = false
+          else if (r.exitCode === 1) behind[pr.number] = true
+        } catch {
+          // unknown: GitHub's merge state decides
+        }
+      }
       const facts = {}
       let fetched = 0
       const keep = new Set()
@@ -364,9 +378,10 @@ async function gatherCi($, cached) {
         const k = 'ci-run\u0000' + p.repo + '\u0000' + r.id
         keep.add(k)
         let f = await $.store.get(k)
-        if (!f && fetched < 4) {
+        if ((!f || (f.retry && (f.tries || 0) < 3)) && fetched < 4) {
           fetched += 1
-          f = await runFacts($, p.repo, r)
+          const tries = ((f && f.tries) || 0) + 1
+          f = { ...(await runFacts($, p.repo, r)), tries }
           await $.store.set(k, f)
         }
         if (f) facts[r.id] = f
@@ -374,7 +389,7 @@ async function gatherCi($, cached) {
       for (const k of await $.store.keys()) if (k.startsWith('ci-run\u0000' + p.repo + '\u0000') && !keep.has(k)) await $.store.delete(k)
       const budgets = budgetsFromDone(await readMain($, p.path, 'scripts/done'))
       const slotCount = (repoSlots.find((x) => x.repo === p.repo) || {}).slots ?? null
-      out.push({ name: p.name, repo: p.repo, key, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now: Date.now() }) })
+      out.push({ name: p.name, repo: p.repo, key, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now: Date.now(), behind }) })
     } catch (err) {
       const before = [...ci.projects, ...((cached && cached.projects) || [])].find((x) => x.repo === p.repo && x.ci)
       out.push({ name: p.name, repo: p.repo, key, ci: before ? before.ci : null, stale: true, error: String((err && err.message) || err) })
@@ -528,18 +543,19 @@ function boardView($, E, width, surface) {
 
 // Cut text to n columns, so a row stays one line in a narrow pane.
 function fit(text, n) {
-  const t = String(text || '')
+  const t = sanitize(String(text || ''), 2000).replace(/\n/g, ' ')
   return t.length > n ? t.slice(0, Math.max(1, n - 1)) + '…' : t
 }
 
 function linkOrText(E, url, label, surface) {
   const { Link, Text } = E
+  label = sanitize(label, 300).replace(/\n/g, ' ')
   return surface === 'desktop' && /^https?:\/\//.test(String(url || '')) ? Link({ href: url, label }) : Text({ wrap: 'truncate-end', children: [label] })
 }
 
 // A row's main text: one line, cut at the end when the pane is narrow.
 function line(E, text, extra = {}) {
-  return E.Text({ ...extra, wrap: 'truncate-end', children: [text] })
+  return E.Text({ ...extra, wrap: 'truncate-end', children: [sanitize(text, 2000)] })
 }
 
 function section(E, title, children) {
@@ -644,7 +660,7 @@ function ciView(E, width, surface) {
     if (c.queued.length) {
       const qrows = []
       for (const j of c.queued) {
-        qrows.push(row(E, [line(E, fit(`${j.prs.length ? 'PR ' + j.prs[0] : j.branch} · ${j.name}`, Math.max(20, width - 30))), pill(E, surface, (j.stuck ? 'stuck ' : 'queued ') + fmtDuration(j.wait), j.stuck ? 'bad' : 'warn')]))
+        qrows.push(row(E, [line(E, fit(`${j.prs.length ? 'PR ' + j.prs[0] : j.branch} · ${j.name}`, Math.max(20, width - 30))), pill(E, surface, (j.stuck ? 'stuck ' : j.status === 'queued' ? 'queued ' : j.status + ' ') + fmtDuration(j.wait), j.stuck ? 'bad' : j.status === 'queued' ? 'warn' : 'muted')]))
         if (j.stuck) qrows.push(Text({ dimColor: true, children: [fit(`  wants ${j.labels.join(', ') || 'no labels'} · pool has ${c.pool.labels.join(', ') || 'none'}`, width - 2)] }))
       }
       rows.push(section(E, 'Queued', qrows))

@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -49,7 +49,7 @@ const RUNNERS = JSON.stringify({ runners: [
   { name: 'mac-callflow-2-1791150808', status: 'online', busy: false, labels: [{ name: 'gcauc' }, { name: 'self-hosted' }, { name: 'Linux' }, { name: 'ARM64' }] },
 ] })
 const CHECK_PRS = JSON.stringify([
-  { number: 52, title: 'Inbox filters', url: 'https://github.com/garrettyarmo/callflow/pull/52', mergeStateStatus: 'BEHIND', statusCheckRollup: [
+  { number: 52, title: 'Inbox filters', url: 'https://github.com/garrettyarmo/callflow/pull/52', headRefName: 'build/52-inbox', mergeStateStatus: 'BLOCKED', statusCheckRollup: [
     { __typename: 'CheckRun', name: 'guard', status: 'COMPLETED', conclusion: 'FAILURE', completedAt: ago(600000) },
     { __typename: 'CheckRun', name: 'guard', status: 'COMPLETED', conclusion: 'SUCCESS', completedAt: ago(100000) },
     { __typename: 'CheckRun', name: 'done', status: 'IN_PROGRESS', conclusion: null, startedAt: ago(240000) },
@@ -82,15 +82,20 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     const a = e.argv.join(' ')
     if (a.startsWith('gh') && world.ghFails) return { value: { exitCode: 1, stdout: '', stderr: 'HTTP 502' } }
     if (a.startsWith('gh issue list')) return { value: { exitCode: 0, stdout: ISSUES, stderr: '' } }
-    if (a.startsWith('gh pr list') && a.includes('statusCheckRollup')) return { value: { exitCode: 0, stdout: CHECK_PRS, stderr: '' } }
+    if (a.startsWith('gh pr list') && a.includes('statusCheckRollup')) return { value: { exitCode: 0, stdout: world.nastyTitle ? CHECK_PRS.replace('Inbox filters', 'Inbox\\u001b[31m filters') : CHECK_PRS, stderr: '' } }
     if (a.startsWith('gh pr list') && a.includes('--state open')) return { value: { exitCode: 0, stdout: '[]', stderr: '' } }
     if (a.startsWith('gh api repos/garrettyarmo/callflow/actions/runs?')) return { value: { exitCode: 0, stdout: RUNS, stderr: '' } }
     const jm = a.match(/^gh api repos\/garrettyarmo\/callflow\/actions\/runs\/(\d+)\/jobs/)
     if (jm) return { value: { exitCode: 0, stdout: JOBS[jm[1]] || '{"jobs":[]}', stderr: '' } }
     if (a.startsWith('gh api repos/garrettyarmo/callflow/actions/runners')) return { value: { exitCode: 0, stdout: RUNNERS, stderr: '' } }
     if (a.startsWith('gh api repos/garrettyarmo/callflow/check-runs/9402/annotations')) return { value: { exitCode: 0, stdout: REFUSAL, stderr: '' } }
-    if (a.startsWith('sh -c gh api repos/garrettyarmo/callflow/actions/jobs/9403/logs')) return { value: { exitCode: 0, stdout: 'done --fast: green in 127s\n', stderr: '' } }
-    if (a.startsWith('sh -c gh api repos/garrettyarmo/callflow/actions/jobs/9401/logs')) return { value: { exitCode: 0, stdout: 'done --fast: green in 151s\n', stderr: '' } }
+    if (a.startsWith('sh -c out=') && a.endsWith('/actions/jobs/9403/logs')) {
+      world.logCalls += 1
+      if (world.logFailsOnce && world.logCalls === 1) return { value: { exitCode: 3, stdout: '', stderr: 'HTTP 404' } }
+      return { value: { exitCode: 0, stdout: 'done --fast: green in 127s\n', stderr: '' } }
+    }
+    if (a.startsWith('sh -c out=') && a.endsWith('/actions/jobs/9401/logs')) return { value: { exitCode: 0, stdout: 'done --fast: green in 151s\n', stderr: '' } }
+    if (a.startsWith('git -C /home/code/callflow merge-base --is-ancestor origin/main origin/build/52-inbox')) return { value: { exitCode: 1, stdout: '', stderr: '' } }
     if (a.startsWith('limactl list gcauc-ci')) return { value: { exitCode: 0, stdout: 'Running\n', stderr: '' } }
     if (a === 'gh api user --jq .login') return { value: { exitCode: 0, stdout: 'garrettyarmo\n', stderr: '' } }
     if (a.startsWith('gh pr list')) return { value: { exitCode: 0, stdout: JSON.stringify([{ number: 9, title: 'Fresh tree', mergedAt: 'x', url: 'p9' }]), stderr: '' } }
@@ -312,4 +317,35 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   expect(settings.permissions.allow).toEqual(['Bash(gh pr view:*)'])
   expect((saved.get(key) as { state: string }).state).toBe('applied')
   await ui.unmount()
+})
+
+test('a job log GitHub has not finished uploading is read again on a later refresh', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.logFailsOnce = true
+  world.logCalls = 0
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  const k = 'ci-run\u0000garrettyarmo/callflow\u0000403'
+  expect((saved.get(k) as { retry?: boolean; fast: unknown }).retry).toBe(true)
+  await $.command.run({ command: 'board', args: 'refresh' })
+  expect((saved.get(k) as { fast: { seconds: number } }).fast.seconds).toBe(127)
+  world.logFailsOnce = false
+})
+
+test('a control character in a PR title is dropped, and the CI tab still draws on both surfaces', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.nastyTitle = true
+  await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'tab-ci' })
+    expect(await ui.find({ type: surface === 'desktop' ? 'Link' : 'Text', text: /#52 Inbox filters/ })).toBeDefined()
+    await ui.unmount()
+  }
+  world.nastyTitle = false
 })

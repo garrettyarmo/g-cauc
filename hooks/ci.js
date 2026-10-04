@@ -54,7 +54,7 @@ export function parseRunJobs(text, run) {
       startedAt: j.started_at || null,
       completedAt: j.completed_at || null,
       runner: j.runner_name || null,
-      labels: j.labels || [],
+      labels: Array.isArray(j.labels) ? j.labels.map(String) : typeof j.labels === 'string' ? [j.labels] : [],
       steps,
       step: current ? current.name : null,
       url: j.html_url || '',
@@ -70,7 +70,7 @@ export function parseRunners(text) {
     name: r.name || '',
     status: r.status || '',
     busy: Boolean(r.busy),
-    labels: (r.labels || []).map((l) => (typeof l === 'string' ? l : l.name)),
+    labels: (Array.isArray(r.labels) ? r.labels : []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean),
     slot: Number(((r.name || '').match(/-(\d+)-\d+$/) || [])[1]) || null,
   }))
 }
@@ -124,12 +124,14 @@ export function refusalMessage(annotations) {
 // The latest state of each named check on a PR's head commit.
 export function latestChecks(rollup) {
   const out = {}
-  const at = (c) => Date.parse(c.completedAt || c.startedAt || '') || 0
+  const done = (c) => !(c.status && c.status !== 'COMPLETED') && !(c.state && /PENDING|EXPECTED/.test(c.state))
+  // Unfinished runs rank above every finished one; finished ones rank by time, then order.
+  const rank = (c, i) => (!done(c) ? Number.MAX_SAFE_INTEGER - 1000 + i : Date.parse(c.completedAt || c.startedAt || '') || i)
   const seen = {}
   ;(Array.isArray(rollup) ? rollup : []).forEach((c, i) => {
     const name = c.name || c.context
     if (!name) return
-    const when = at(c) || i
+    const when = rank(c, i)
     if (seen[name] !== undefined && seen[name] > when) return
     seen[name] = when
     let state
@@ -148,7 +150,7 @@ export function latestChecks(rollup) {
 const KEY_CHECKS = ['done', 'agent-review', 'guard']
 
 // Everything the CI tab shows for one project.
-export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, now }) {
+export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, now, behind }) {
   const pool = (runners || []).filter((r) => r.labels.includes('gcauc'))
   const idle = pool.filter((r) => r.status === 'online' && !r.busy)
   const poolLabels = [...new Set(pool.flatMap((r) => r.labels))]
@@ -163,7 +165,7 @@ export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, n
     .filter((j) => j.status !== 'in_progress')
     .map((j) => {
       const wait = secs(j.createdAt, new Date(now).toISOString()) || 0
-      return { ...j, wait, stuck: wait > 120 && idle.length > 0 }
+      return { ...j, wait, stuck: j.status === 'queued' && wait > 120 && idle.length > 0 }
     })
   const completed = (runs || []).filter((r) => r.status === 'completed').slice(0, 20)
   const recent = completed.map((r) => ({ id: r.id, conclusion: r.conclusion, seconds: secs(r.startedAt, r.updatedAt), title: r.title, workflow: r.workflow }))
@@ -185,7 +187,8 @@ export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, n
     const shown = {}
     for (const k of KEY_CHECKS) if (checks[k]) shown[k] = checks[k]
     for (const [k, v] of Object.entries(checks)) if (v === 'fail' && !shown[k]) shown[k] = v
-    return { number: p.number, title: p.title || '', url: p.url || '', behind: p.mergeStateStatus === 'BEHIND', checks: shown }
+    const known = behind ? behind[p.number] : undefined
+    return { number: p.number, title: p.title || '', url: p.url || '', behind: typeof known === 'boolean' ? known : p.mergeStateStatus === 'BEHIND', checks: shown }
   })
   return {
     pool: { configured: slots ?? null, online: pool.filter((r) => r.status === 'online').length, busy: pool.filter((r) => r.busy).length, idle: idle.length, labels: poolLabels, runners: pool },

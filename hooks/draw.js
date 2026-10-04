@@ -4,6 +4,8 @@
 // colored text. Each takes the element table from $.ui.resolve(e) and the
 // surface name; none touches the mods API.
 
+import { sanitize } from './lib.js'
+
 const TONES = {
   accent: { hex: '#3B82F6', ink: '#FFFFFF', term: 'blue' },
   good: { hex: '#22A06B', ink: '#FFFFFF', term: 'green' },
@@ -21,6 +23,7 @@ const isDesktop = (surface) => surface === 'desktop'
 
 // Text in a tone: a hex on the Desktop app, a named color in a terminal.
 export function colored(E, surface, name, text, extra = {}) {
+  text = sanitize(text, 2000)
   const t = tone(name)
   return E.Text({ ...extra, color: isDesktop(surface) ? t.hex : t.term, children: [text] })
 }
@@ -46,6 +49,7 @@ export function progress(E, surface, done, total, { width = 160, cells = 12, col
 
 // A status pill. Desktop: a rounded filled label. Terminal: a colored dot and word.
 export function pill(E, surface, label, name = 'muted') {
+  label = sanitize(label, 80).replace(/\n/g, ' ')
   const t = tone(name)
   if (isDesktop(surface) && E.Svg) {
     const w = Math.round(String(label).length * 6.3 + 16)
@@ -57,6 +61,7 @@ export function pill(E, surface, label, name = 'muted') {
 
 // Pool slots as squares: busy filled, idle outlined, offline dimmed.
 export function slots(E, surface, list) {
+  list = list.slice(0, 48)
   if (isDesktop(surface) && E.Svg) {
     const n = Math.max(list.length, 1)
     const w = n * 18
