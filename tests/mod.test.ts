@@ -155,7 +155,7 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   const saved = new Map<string, unknown>()
   const toasts: string[] = []
   const written: Record<string, string> = {}
-  mock.clock(on, { now: Date.now() })
+  const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, toasts)
   on('fs.write', ($, e) => {
     written[e.path] = e.text
@@ -195,6 +195,12 @@ test('approvals are counted by call id: only prompts you approved, and the rule 
   await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 71 --json state' }, permission_suggestions: sugg })
   await $.classic.PostToolUse({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'gh pr view 71 --json state' }, tool_response: {}, tool_use_id: 'E' })
   expect(saved.get(key)).toEqual({ count: 10, state: 'suggested' })
+  // F gets its own dialog and is denied, so it never runs: nothing more counts.
+  await $.classic.PermissionRequest({ session_id: 's', transcript_path: 't', cwd, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'gh pr view 71 --json state' }, permission_suggestions: sugg })
+  expect(saved.get(key)).toEqual({ count: 10, state: 'suggested' })
+  // An ask the classifier denied (no dialog) and is now 3 minutes old does not swallow the next approval.
+  await $.tool.check({ tool: 'Bash', input: { command: 'gh pr view 71 --json state' }, tool_use_id: 'G-denied-by-classifier' })
+  await clock.advance(3 * 60_000)
   await ask('ok-9', true)
   expect(saved.get(key)).toEqual({ count: 11, state: 'suggested' })
   expect(toasts.filter((t) => t.includes('Bash(gh pr view:*) 10 times')).length).toBe(1)

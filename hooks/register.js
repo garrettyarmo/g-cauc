@@ -90,7 +90,7 @@ export function register(on, options) {
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     if (verdict && verdict.decision === 'ask' && e.tool_use_id && next.origin && next.origin.plugin === 'engine') {
-      const now = Date.now()
+      const now = await $.clock.now()
       for (const [id, a] of asks) if (now - a.at > 30 * 60_000) asks.delete(id)
       asks.set(e.tool_use_id, { tool: e.tool, key: callKey(e.tool, e.input), at: now, rules: null, cwd: '' })
     }
@@ -102,8 +102,13 @@ export function register(on, options) {
     if (rules.length) {
       // The dialog belongs to the open ask for the same call (tool and command
       // or path). Anything else, including no match, counts nothing.
+      // A dialog opens seconds after its call is checked, so only calls checked in
+      // the last 2 minutes qualify (an ask the auto-mode classifier denied never
+      // gets a dialog and must not swallow a later one); the oldest of those wins,
+      // since dialogs arrive in call order.
       const key = callKey(e.tool_name, e.tool_input)
-      const match = [...asks.values()].filter((a) => a.key === key && !a.rules)
+      const now = await $.clock.now()
+      const match = [...asks.values()].filter((a) => a.key === key && !a.rules && now - a.at < 120_000)
       const ask = match.length ? match[0] : null
       if (ask) {
         ask.rules = rules
