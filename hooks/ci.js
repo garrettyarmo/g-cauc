@@ -149,6 +149,21 @@ export function latestChecks(rollup) {
 
 const KEY_CHECKS = ['done', 'agent-review', 'guard']
 
+// One state per pool slot. A slot can hold more than one registration at a
+// time (each job gets a fresh one-job runner), so a slot is busy when any of
+// its registrations is busy, idle when one is online, and offline otherwise.
+export function slotStates(runners, configured) {
+  const bySlot = new Map()
+  for (const r of runners) if (r.slot) bySlot.set(r.slot, [...(bySlot.get(r.slot) || []), r])
+  const total = configured ?? Math.max(0, ...bySlot.keys())
+  const states = []
+  for (let n = 1; n <= total; n++) {
+    const regs = bySlot.get(n) || []
+    states.push(regs.some((r) => r.busy) ? 'busy' : regs.some((r) => r.status === 'online') ? 'idle' : 'offline')
+  }
+  return states
+}
+
 // Everything the CI tab shows for one project.
 export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, now, behind }) {
   const pool = (runners || []).filter((r) => r.labels.includes('gcauc'))
@@ -190,8 +205,9 @@ export function summarizeCi({ runs, jobs, runners, slots, prs, facts, budgets, n
     const known = behind ? behind[p.number] : undefined
     return { number: p.number, title: p.title || '', url: p.url || '', behind: typeof known === 'boolean' ? known : p.mergeStateStatus === 'BEHIND', checks: shown }
   })
+  const states = slotStates(pool, slots ?? null)
   return {
-    pool: { configured: slots ?? null, online: pool.filter((r) => r.status === 'online').length, busy: pool.filter((r) => r.busy).length, idle: idle.length, labels: poolLabels, runners: pool },
+    pool: { configured: slots ?? null, slots: states, busy: states.filter((s) => s === 'busy').length, idle: states.filter((s) => s === 'idle').length, offline: states.filter((s) => s === 'offline').length, labels: poolLabels, runners: pool },
     running,
     queued,
     stuck: queued.filter((j) => j.stuck).length,
@@ -209,7 +225,7 @@ export function ciBand(projects) {
   const running = all.reduce((a, p) => a + p.ci.running.length, 0)
   const queued = all.reduce((a, p) => a + p.ci.queued.length, 0)
   const busy = all.reduce((a, p) => a + p.ci.pool.busy, 0)
-  const total = all.reduce((a, p) => a + (p.ci.pool.configured ?? p.ci.pool.runners.length), 0)
+  const total = all.reduce((a, p) => a + p.ci.pool.slots.length, 0)
   const stuck = all.reduce((a, p) => a + p.ci.stuck, 0)
   const refused = all.some((p) => p.ci.refusal)
   if (!running && !queued && !stuck && !refused) return null
