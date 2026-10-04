@@ -13,6 +13,9 @@ import { colored, progress, pill, slots, dots, budgetTone } from './draw.js'
 
 const PANE = 'g-cauc-board'
 const STALE_MS = 45_000
+// The CI snapshot's store key names its shape, so a session never reads a
+// snapshot an older version of the board wrote.
+const CI_SNAPSHOT = 'ci-snapshot-2'
 const APPROVALS_TO_SUGGEST = 10
 
 let home = ''
@@ -188,12 +191,12 @@ async function refresh($, force) {
     }
     jobs = await gatherJobs($)
     recent = await gatherRecent($)
-    const ciCached = await $.store.get('ci-snapshot')
+    const ciCached = await $.store.get(CI_SNAPSHOT)
     if (!force && ciCached && Date.now() - ciCached.at < STALE_MS) {
       ci = ciCached
     } else {
       ci = await gatherCi($, ciCached)
-      await $.store.set('ci-snapshot', ci)
+      await $.store.set(CI_SNAPSHOT, ci)
     }
     lanes = await withLaneState($, lanes)
     allow = await loadAllow($)
@@ -640,14 +643,8 @@ function ciView(E, width, surface) {
       continue
     }
     const c = p.ci
-    const total = c.pool.configured ?? c.pool.runners.length
-    if (total) {
-      const list = []
-      for (let n = 1; n <= total; n++) {
-        const r = c.pool.runners.find((x) => x.slot === n)
-        list.push(!r || r.status !== 'online' ? 'offline' : r.busy ? 'busy' : 'idle')
-      }
-      rows.push(row(E, [Text({ children: ['Pool'] }), slots(E, surface, list), Text({ dimColor: true, children: [`${c.pool.busy} busy · ${c.pool.idle} idle${c.pool.online < total ? ` · ${total - c.pool.online} offline` : ''}`] })]))
+    if (c.pool.slots.length) {
+      rows.push(row(E, [Text({ children: ['Pool'] }), slots(E, surface, c.pool.slots), Text({ dimColor: true, children: [`${c.pool.busy} busy · ${c.pool.idle} idle${c.pool.offline ? ` · ${c.pool.offline} offline` : ''}`] })]))
     }
     if (c.refusal) rows.push(row(E, [pill(E, surface, 'refused', 'bad'), colored(E, surface, 'bad', `${c.refusal.message} (${c.refusal.runs} run${c.refusal.runs === 1 ? '' : 's'})`)]))
     if (c.running.length) {
