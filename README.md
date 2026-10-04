@@ -28,6 +28,7 @@ Status: v1, 2026-10-01, untested. CallFlow is the pilot.
 | `.claude-plugin/` | The plugin and marketplace manifests, so Claude Code installs all of this as one plugin. |
 | `scripts/install.sh` | Links every skill into `~/.codex/skills` for Codex. Claude gets them from the plugin. |
 | `scripts/labels.sh` | Creates or updates the label set on a repo. |
+| `runner/` | The CI runner pool on Garrett's Mac: a Linux VM, a job image, and `gcauc-runner`, which gives every CI job a fresh container with a one-job runner registration. See `runner/README.md`. |
 
 ## The contract every project meets
 
@@ -43,6 +44,7 @@ The kit never assumes a language or framework. It only calls these entry points 
 | `AGENTS.md` | The map every tool reads (outline in `templates/AGENTS.md`), including a `Test layers` table and an `Autonomy:` line. |
 | `CLAUDE.md` | `@AGENTS.md` plus any Claude-only lines. |
 | GitHub | Branch protection on main (PR only, CI and `agent-review` required, no bypass), auto-merge allowed, the label set, Issues on. |
+| CI | Every workflow job that runs project code uses `runs-on: [self-hosted, gcauc]`, the runner pool in `runner/`, not GitHub's hosted runners (hosted minutes ran out on CallFlow on 2026-10-04). |
 
 Which test tools sit behind `scripts/done` is the project's choice and is written in its `Test layers` table: pytest, Vitest, Jest, Playwright, simulated phone calls, data checks. Every acceptance check in a spec names its layer and the command that proves it.
 
@@ -92,6 +94,13 @@ Codex reads the same skills through links:
 
 ```bash
 ~/code/g-cauc/scripts/labels.sh garrettyarmo/callflow
+```
+
+The CI runner pool (once per Mac; it serves every repo in `runner/repos`):
+
+```bash
+~/code/g-cauc/runner/gcauc-runner up
+~/code/g-cauc/runner/gcauc-runner install
 ```
 
 ## Make it yours

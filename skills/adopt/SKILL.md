@@ -22,7 +22,7 @@ On a new branch, add:
 - `AGENTS.md` from `~/code/g-cauc/templates/AGENTS.md`, filled from what exists, with `Autonomy: attended` and a `Test layers` table naming this project's real tools. Fold the existing CLAUDE.md's instructions into the matching AGENTS.md sections; nothing gets lost.
 - `CLAUDE.md` from the template: `@AGENTS.md` plus Claude-only lines.
 - `scripts/done` (`--fast`, `--full`), `scripts/dev` (`up`, `down`, `testdb -- CMD`) and `scripts/deploy` (`staging`), each a thin wrapper over the project's own tools, under about 100 lines, holding no state. A piece that does not exist yet (often staging) exits non-zero with `not set up yet: see ROADMAP phase 1`.
-- A CI workflow: on every pull request, `scripts/done --full`; on every push to main, `scripts/deploy staging` once staging exists.
+- A CI workflow: on every pull request, `scripts/done --full`; on every push to main, `scripts/deploy staging` once staging exists. Every job that runs project code uses `runs-on: [self-hosted, gcauc]` (the pool in `~/code/g-cauc/runner/`), because hosted minutes on a private repo run out (CallFlow, 2026-10-04). A job that needs what the pool must not hold, such as a production credential, stays on `ubuntu-latest` with a comment saying why. Add the repo to `~/code/g-cauc/runner/repos` with its slot count (3 by default) and restart the pool.
 - `.gitignore` entries for `AK_PR.md`, `AK_FIX.md` and `AK_REVIEW.md`.
 
 Prove the scripts: run `scripts/done --fast` and `--full` and paste the summaries in the PR.
