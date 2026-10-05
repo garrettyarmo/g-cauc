@@ -98,7 +98,7 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     }
     if (a.startsWith('sh -c out=') && a.endsWith('/actions/jobs/9401/logs')) return { value: { exitCode: 0, stdout: 'done --fast: green in 151s\n', stderr: '' } }
     if (a.startsWith('git -C /home/code/callflow merge-base --is-ancestor origin/main origin/build/52-inbox')) return { value: { exitCode: 1, stdout: '', stderr: '' } }
-    if (a.startsWith('limactl list gcauc-ci')) return { value: { exitCode: 0, stdout: 'Running\n', stderr: '' } }
+    if (a.startsWith('limactl list gcauc-callflow ')) return { value: { exitCode: 0, stdout: 'Running\n', stderr: '' } }
     if (a === 'gh api user --jq .login') return { value: { exitCode: 0, stdout: 'garrettyarmo\n', stderr: '' } }
     if (a.startsWith('gh pr list')) return { value: { exitCode: 0, stdout: JSON.stringify([{ number: 9, title: 'Fresh tree', mergedAt: 'x', url: 'p9' }]), stderr: '' } }
     if (a.startsWith('pgrep')) return { value: { exitCode: 0, stdout: '501 /Users/g/.local/bin/cursor-agent -p --model grok-4.7-high [ak:callflow#12:agent-review:2] review\n', stderr: '' } }
