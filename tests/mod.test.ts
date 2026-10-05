@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, calls: [] as string[] }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -80,6 +80,8 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
   on('session.usage', () => ({ value: { rateLimits: [{ kind: 'five_hour', percentUsed: 42, resetsAt: '2099-10-02T18:00:00Z' }] } }))
   on('process.run', ($, e) => {
     const a = e.argv.join(' ')
+    world.calls.push(a)
+    if (a.startsWith('gh') && world.rateLimited) return { value: { exitCode: 1, stdout: '', stderr: 'GraphQL: API rate limit already exceeded for user ID 1.' } }
     if (a.startsWith('gh') && world.ghFails) return { value: { exitCode: 1, stdout: '', stderr: 'HTTP 502' } }
     if (a.startsWith('gh issue list')) return { value: { exitCode: 0, stdout: ISSUES, stderr: '' } }
     if (a.startsWith('gh pr list') && a.includes('statusCheckRollup')) return { value: { exitCode: 0, stdout: world.nastyTitle ? CHECK_PRS.replace('Inbox filters', 'Inbox\\u001b[31m filters') : CHECK_PRS, stderr: '' } }
@@ -406,5 +408,80 @@ test('each project is drawn in its own color from projects.md, and a project wit
     await term.unmount()
   } finally {
     FILES['/home/code/g-cauc/projects.md'] = before
+  }
+})
+
+const issueReads = () => world.calls.filter((c) => c.startsWith('gh issue list')).length
+
+test('the board reads GitHub every 5 minutes when no pane is open, every 2 minutes when one is, and once per refresh for open PRs', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  expect(issueReads()).toBe(1)
+  // One open-PR read per project: the CI read reuses it
+  expect(world.calls.filter((c) => c.startsWith('gh pr list') && c.includes('--state open')).length).toBe(1)
+  // Ticks every minute read local data only, until 5 minutes have passed
+  await clock.advance(4 * 60_000)
+  expect(issueReads()).toBe(1)
+  await clock.advance(60_000)
+  expect(issueReads()).toBe(2)
+  // With the pane open, GitHub is read every 2 minutes
+  await $.command.run({ command: 'board', args: '' })
+  await clock.advance(60_000)
+  expect(issueReads()).toBe(2)
+  await clock.advance(60_000)
+  expect(issueReads()).toBe(3)
+  // The Refresh button reads at once
+  await $.command.run({ command: 'board', args: 'refresh' })
+  expect(issueReads()).toBe(4)
+})
+
+test('while another session reads GitHub, this one shows the shared snapshot and reads nothing', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const old = Date.now() - 10 * 60_000
+  saved.set('snapshot', { at: old, lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
+  saved.set('ci-snapshot-2', { at: old, vm: 'Running', billing: null, projects: [] })
+  saved.set('gh-lease', { at: Date.now(), by: 'another session' })
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  expect(world.calls.filter((c) => c.startsWith('gh ')).length).toBe(0)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
+  await ui.unmount()
+  // A lease older than 2 minutes is dead: its session stopped, so this one reads
+  await clock.advance(2 * 60_000)
+  expect(issueReads()).toBe(1)
+  expect(saved.get('gh-lease')).toBeUndefined()
+})
+
+test('a GitHub rate limit stops every session for 10 minutes, even the Refresh button, and the board says so', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  world.rateLimited = true
+  try {
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    expect(issueReads()).toBe(1)
+    expect((saved.get('gh-pause') as { until: number }).until).toBeGreaterThan(Date.now() + 9 * 60_000)
+    await $.command.run({ command: 'board', args: 'refresh' })
+    await clock.advance(5 * 60_000)
+    expect(issueReads()).toBe(1)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: /GitHub rate limit: paused for \d+ more min/ })).toBeDefined()
+    await ui.unmount()
+    world.rateLimited = false
+    await clock.advance(6 * 60_000)
+    expect(issueReads()).toBe(2)
+    expect(saved.get('gh-pause')).toBeDefined()
+  } finally {
+    world.rateLimited = false
   }
 })
