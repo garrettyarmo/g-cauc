@@ -19,7 +19,7 @@ gcauc-runner serve                        one fresh container per job, from gcau
 - `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `rebuild`, `install`, `uninstall`).
 - `runner/repos`: the repositories that the pool serves. Each line gives the slots (jobs at the same time), the CPUs and the memory of that repo's VM. The VMs share the Mac's CPUs, so a quiet VM uses almost no CPU. Each VM keeps its memory, so the total memory must leave room for the Mac.
 
-Each repo's slot has its own work folder (`/home/runner/_work-<repo>-<n>`), so `scripts/dev`'s path-derived ports and compose project names never collide between concurrent jobs, and a slot's cleanup after its job removes only what that slot started.
+Each job has its own work folder (`/home/runner/_work-<repo>-<n>-<time>`). `scripts/dev` derives the compose project name and the ports from that path. Thus each job gets a new database volume, and two jobs at the same time never use the same project. After a job, its slot removes the compose containers of that job. It also removes the volumes that no container uses: anonymous volumes at once, and named volumes after 6 hours (GitHub's job limit).
 
 ## Security model
 
