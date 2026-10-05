@@ -126,14 +126,14 @@ test('the board shows the phase, the running review, the queue and what needs Ga
   await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
+  await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ key: 'row-callflow-12' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /review r2/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /#16 Spec 001 row 5/ })).toBeDefined()
-  await ui.press({ key: 'tab-lanes' })
+  await ui.press({ key: 'tab-fleet' })
   expect(await ui.find({ type: 'Text', text: /out until 10-06 15:21/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^1\/6/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^42%/ })).toBeDefined()
-  await ui.press({ key: 'tab-now' })
   await ui.press({ key: 'job-501' })
   await clock.settle()
   await ui.press({ key: 'tab-job' })
@@ -145,14 +145,14 @@ test('the board shows the phase, the running review, the queue and what needs Ga
   await ui.unmount()
 })
 
-test('the Desktop app draws bars, pills, slots and dots as SVG on every tab', async ($, on) => {
+test('the Desktop app draws badges, rings, pipelines, bars, pills, cells and dots as SVG on every page', async ($, on) => {
   const saved = new Map<string, unknown>()
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  for (const t of ['plan', 'now', 'ci', 'lanes']) {
+  for (const t of ['all', 'p-callflow', 'fleet']) {
     await ui.press({ key: 'tab-' + t })
     expect(await ui.find({ type: 'Svg' })).toBeDefined()
   }
@@ -170,15 +170,14 @@ test('the board also draws in the terminal', async ($, on) => {
   await ui.unmount()
 })
 
-test('the CI tab shows the pool, running and stuck jobs, results, timings, PR checks and the refusal', async ($, on) => {
+test('the project page shows its pool, running and stuck jobs, results, timings, PR checks and the refusal', async ($, on) => {
   const saved = new Map<string, unknown>()
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab-ci' })
-  expect(await ui.find({ type: 'Text', text: /VM running/ })).toBeDefined()
+  await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /1 busy · 1 idle · 1 offline/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /GitHub refused jobs at the spending limit \(1 run\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /PR 52 · done/ })).toBeDefined()
@@ -189,10 +188,13 @@ test('the CI tab shows the pool, running and stuck jobs, results, timings, PR ch
   expect(await ui.find({ type: 'Text', text: /2 of 3 passed/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /127s of 200s/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /avg 139s/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /✓ guard/ })).toBeDefined()
+  // A PR shows only the checks that have not passed yet
+  expect(await ui.find({ type: 'Text', text: /✓ guard/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /… done/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /… agent-review/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /behind main/ })).toBeDefined()
+  await ui.press({ key: 'tab-fleet' })
+  expect(await ui.find({ type: 'Text', text: /VM running/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /billing needs the gh "user" scope/ })).toBeDefined()
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -243,7 +245,7 @@ test('a CI snapshot an older board saved is never read back', async ($, on) => {
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab-ci' })
+  await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /gh could not read the Actions runs/ })).toBeDefined()
   await ui.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -268,7 +270,7 @@ test('a cold start with projects.md missing shows the last snapshot any session 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
-  await ui.press({ key: 'tab-lanes' })
+  await ui.press({ key: 'tab-fleet' })
   expect(await ui.find({ type: 'Text', text: /^0\/3/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /out until/ })).toBeDefined()
   world.projectsGone = false
@@ -353,7 +355,7 @@ test('a job log GitHub has not finished uploading is read again on a later refre
   world.logFailsOnce = false
 })
 
-test('a control character in a PR title is dropped, and the CI tab still draws on both surfaces', async ($, on) => {
+test('a control character in a PR title is dropped, and the project page still draws on both surfaces', async ($, on) => {
   const saved = new Map<string, unknown>()
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
@@ -362,9 +364,47 @@ test('a control character in a PR title is dropped, and the CI tab still draws o
   await clock.advance(2000)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'tab-ci' })
+    await ui.press({ key: 'tab-p-callflow' })
     expect(await ui.find({ type: surface === 'desktop' ? 'Link' : 'Text', text: /#52 Inbox filters/ })).toBeDefined()
     await ui.unmount()
   }
   world.nastyTitle = false
+})
+
+test('each project is drawn in its own color from projects.md, and a project with no color gets a fallback', async ($, on) => {
+  const before = FILES['/home/code/g-cauc/projects.md']
+  FILES['/home/code/g-cauc/projects.md'] = '| Priority | Project | Path | Repo | Color | Notes |\n|---|---|---|---|---|---|\n| 1 | CallFlow | `~/code/callflow` | `garrettyarmo/callflow` | `#017272` | Pilot |\n| 2 | Bison Brain | `~/code/bisonbrain` | `garrettyarmo/bisonbrain` | | Live |\n'
+  try {
+    const saved = new Map<string, unknown>()
+    const clock = mock.clock(on, { now: Date.now() })
+    stubWorld(on, saved, [])
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    // The All page: one card per project, outlined in its color (Bison Brain has none, so the second fallback)
+    const cards = (await ui.findAll({ type: 'Box' })).filter((b) => b.key && b.key.startsWith('card-'))
+    expect(cards.map((c) => [c.key, c.props.borderColor])).toEqual([['card-callflow', '#017272'], ['card-bisonbrain', '#F48327']])
+    const svgs = (await ui.findAll({ type: 'Svg' })).map((s) => String(s.props.source))
+    expect(svgs.some((s) => s.includes('#017272') && s.includes('>CF<'))).toBe(true)
+    expect(svgs.some((s) => s.includes('#F48327') && s.includes('>BB<'))).toBe(true)
+    // Each project has its own page, with a number key in priority order
+    const nav = (await ui.findAll({ type: 'Button' })).filter((b) => b.key && b.key.startsWith('tab-'))
+    expect(nav.map((b) => [b.key, b.props.hotkey])).toEqual([['tab-all', '0'], ['tab-p-callflow', '1'], ['tab-p-bisonbrain', '2'], ['tab-fleet', 'f']])
+    await ui.press({ key: 'tab-p-callflow' })
+    const pipe = (await ui.findAll({ type: 'Svg' })).find((s) => /ideas, .* ready, .* building, .* open PRs, .* merged 24h/.test(String(s.props.alt)))
+    expect(String(pipe && pipe.props.source)).toContain('#017272')
+    // Fleet: the grok lane's one job is a CallFlow job, so its cell is CallFlow's color
+    await ui.press({ key: 'tab-fleet' })
+    const grok = (await ui.findAll({ type: 'Svg' })).find((s) => s.props.alt === '1 of 6 grok jobs')
+    expect(String(grok && grok.props.source)).toContain('fill="#017272"')
+    await ui.unmount()
+    // A terminal draws the card border in the nearest named color
+    const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await term.press({ key: 'tab-all' })
+    const tcards = (await term.findAll({ type: 'Box' })).filter((b) => b.key && b.key.startsWith('card-'))
+    expect(tcards.map((c) => c.props.borderColor)).toEqual(['cyan', 'yellow'])
+    await term.unmount()
+  } finally {
+    FILES['/home/code/g-cauc/projects.md'] = before
+  }
 })
