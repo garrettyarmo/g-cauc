@@ -170,7 +170,8 @@ cmd_serve() {
       pids+=($!)
     done
   done
-  trap 'kill "${pids[@]}" 2>/dev/null; clear_vms; exit 0' TERM INT
+  # || true: under set -e, a kill that fails (a slot already gone) must not skip clear_vms.
+  trap 'kill "${pids[@]}" 2>/dev/null || true; clear_vms; exit 0' TERM INT
   log "serving ${#pids[@]} slots in ${#lines[@]} VMs"
   wait
 }
