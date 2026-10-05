@@ -60,9 +60,12 @@ up_vm() {
     echo "gcauc-runner: $vm mounts host directories; delete it (limactl delete -f $vm) and run up again" >&2
     exit 1
   fi
-  # The first boot adds the user to the docker group after Lima opened its SSH session, so open
-  # a new one; without it, docker in a new VM fails with "permission denied" on its socket.
-  limactl shell --reconnect --workdir / "$vm" -- true </dev/null
+  # The first boot adds the user to the docker group after Lima opened its SSH session, so docker
+  # in a new VM fails with "permission denied" until a new session opens. Reconnect only then: a
+  # reconnect closes the SSH session that every running slot's `docker run` uses.
+  if ! in_vm "$vm" docker info </dev/null >/dev/null 2>&1; then
+    limactl shell --reconnect --workdir / "$vm" -- true </dev/null
+  fi
   local have_cpus have_mem
   have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
   have_mem="$(($(limactl list "$vm" --format '{{.Memory}}') / 1073741824))"
