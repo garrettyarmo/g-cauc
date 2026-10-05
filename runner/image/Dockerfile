@@ -10,10 +10,8 @@ ARG COMPOSE_SHA256_AMD64=40343e21ca777173e69cff5dbafeb37c6f81f3b0d57d9e597f036e9
 RUN set -eux; \
     apt-get update; \
     # libatomic1: Node's arm64 builds need it (setup-node failed without it on the first job).
-    # lsof and zsh: GitHub's ubuntu-latest has them, and nessy's job reaper needs lsof (without it,
-    # nessy's tests left fake agents running and its CI took hours on the pool, 2026-10-05).
     apt-get install -y --no-install-recommends postgresql-client openssl xz-utils zstd libatomic1 \
-      build-essential pkg-config lsof zsh; \
+      build-essential pkg-config; \
     rm -rf /var/lib/apt/lists/*; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
       arm64) asset=aarch64; sum="$COMPOSE_SHA256_ARM64" ;; \
