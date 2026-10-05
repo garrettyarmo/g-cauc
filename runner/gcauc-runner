@@ -6,6 +6,8 @@
 #   gcauc-runner rebuild    rebuild the job image in each VM from runner/image/Dockerfile
 #   gcauc-runner install    run `serve` at login and keep it running (a launchd agent)
 #   gcauc-runner uninstall  remove that agent and stop serving
+#   gcauc-runner drain      let running jobs finish and start no new one; serve then exits and the
+#                           agent starts it again with runner/repos (a new repo, a new VM size)
 # Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
 # with another project's. Each job runs in a fresh container registered with a one-job
 # (just-in-time) runner config. The config is minted here, with this Mac's gh login, so no
@@ -15,6 +17,8 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 label=gcauc
 repos_file="$here/repos"
+# While this file exists, a slot takes no new job: it stops after its current one (gcauc-runner drain).
+drain_file="$here/.drain"
 logdir="$HOME/Library/Logs/gcauc-runner"
 plist="$HOME/Library/LaunchAgents/com.gcauc.runner.plist"
 version="$(sed -n 's#^FROM ghcr.io/actions/actions-runner:##p' "$here/image/Dockerfile")"
@@ -70,7 +74,15 @@ up_vm() {
   have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
   have_mem="$(($(limactl list "$vm" --format '{{.Memory}}') / 1073741824))"
   if [ "$have_cpus" != "$cpus" ] || [ "$have_mem" != "$mem" ]; then
-    log "$vm has $have_cpus CPUs and $have_mem GiB; runner/repos asks for $cpus and $mem. To resize it with no job running: limactl stop $vm && limactl edit $vm --cpus $cpus --memory $mem && limactl start $vm"
+    # A resize restarts the VM, so it happens only when no job container runs in it (serve after a drain).
+    if [ -z "$(in_vm "$vm" docker ps -q --filter name=^gcauc- </dev/null 2>/dev/null)" ]; then
+      log "$vm: resizing from $have_cpus CPUs and $have_mem GiB to $cpus and $mem"
+      limactl stop "$vm" </dev/null >/dev/null 2>&1
+      limactl edit "$vm" --cpus "$cpus" --memory "$mem" --tty=false --start </dev/null >/dev/null 2>&1
+      limactl shell --reconnect --workdir / "$vm" -- true </dev/null
+    else
+      log "$vm has $have_cpus CPUs and $have_mem GiB; runner/repos asks for $cpus and $mem. Run gcauc-runner drain to resize it with no job running."
+    fi
   fi
   in_vm "$vm" docker image inspect "$image" </dev/null >/dev/null 2>&1 || in_vm "$vm" docker build -q -t "$image" - <"$here/image/Dockerfile"
 }
@@ -118,6 +130,10 @@ slot() {
   # Per repo and slot, so a slot's sweep removes only what that slot started.
   local work="_work-$short-$n" name jit status
   while true; do
+    if [ -e "$drain_file" ]; then
+      log "$repo slot $n: draining, so this slot stops"
+      return 0
+    fi
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
       -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
@@ -152,6 +168,7 @@ clear_vms() {
 
 cmd_serve() {
   mkdir -p "$logdir"
+  rm -f "$drain_file"
   cmd_up
   local l gid ncpu per windows n pids=()
   for l in ${lines[@]+"${lines[@]}"}; do
@@ -174,6 +191,26 @@ cmd_serve() {
   trap 'kill "${pids[@]}" 2>/dev/null || true; clear_vms; exit 0' TERM INT
   log "serving ${#pids[@]} slots in ${#lines[@]} VMs"
   wait
+  # Every slot returned, which happens only in a drain: exit, and the agent starts serve again.
+  log "every slot stopped (drain); exiting so the agent starts serve again"
+}
+
+# Start no new job, and remove each idle runner's container (it waits for a job that must not come).
+# Busy slots finish their jobs and stop; then serve exits and the launchd agent starts it again.
+cmd_drain() {
+  local l name n short
+  load_repos
+  touch "$drain_file"
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    short="${repo##*/}"
+    for name in $(gh api "repos/$repo/actions/runners?per_page=100" --jq \
+      ".runners[] | select(.busy == false and (.name | startswith(\"$host-$short-\"))) | .name" 2>/dev/null); do
+      n="${name#"$host-$short-"}"
+      in_vm "$vm" docker rm -f "gcauc-$short-${n%%-*}" </dev/null >/dev/null 2>&1 || true
+    done
+  done
+  log "drain: no slot takes a new job; running jobs finish, then serve exits and the agent starts it again"
 }
 
 cmd_status() {
@@ -227,5 +264,6 @@ case "${1:-}" in
   rebuild) cmd_rebuild ;;
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  drain) cmd_drain ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
