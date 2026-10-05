@@ -1,6 +1,6 @@
 # Writing for people
 
-Garrett reads what the agents write, and he must understand the state of the work at all times. Thus, all the text that a person reads is in Simplified Technical English (STE). STE is the controlled language of aircraft manuals, from the specification ASD-STE100. Garrett asked for STE on 2026-10-04, after he could not follow the work from the PRs, the reviews, and the board.
+Garrett reads what the agents write, and he must understand the state of the work at all times. Thus, all the text that a person reads is in Simplified Technical English (STE). STE is the controlled language of aircraft manuals, from the specification ASD-STE100. Garrett asked for STE on 2026-10-04, because he could not follow the PRs, the reviews, and the board.
 
 The full rules and the check tool are in `vendor/simplified-technical-english/`. That copy comes from https://github.com/0xpili/simplified-technical-english at commit 1e148d6. This file gives the part of STE that g-cauc uses. This file is in STE.
 
@@ -41,7 +41,7 @@ If an STE sentence changes the meaning, keep the correct meaning. Correct text i
 
 ## When you ask Garrett to do a task
 
-Garrett does not do a task that he does not understand. Before you ask him to run a command, to change a setting, or to make a decision, give him these 4 items:
+Garrett does not do a task that he does not understand. Before you ask him to run a command, change a setting or make a decision, give him these 4 items:
 
 1. **What it is:** the thing, in words that do not need the code.
 2. **Why it matters:** what goes wrong if he does not do it.
@@ -52,7 +52,7 @@ Example: "This command reads the secret on your Mac and shows only the lines tha
 
 ## The check
 
-Write the text to a file before you post it. Do this also for a chat reply that asks Garrett to do a task or that is longer than 10 lines. Then run:
+Write the text to a file before you post it. Do this also for a chat reply of more than 10 lines. Do it for a reply that asks Garrett to do a task. Then run:
 
 ```bash
 python3 ~/code/g-cauc/vendor/simplified-technical-english/scripts/ste_check.py --no-vocab --mode descriptive <file>
