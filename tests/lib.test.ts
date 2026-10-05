@@ -2,8 +2,9 @@ import { expect, test } from 'claude-code/testing'
 import {
   parseProjects, parseLanes, parseRoadmap, issueSpec, blockers, summarizeProject, parseJobs, laneOf,
   modelName, parseEtime, fmtDuration, parseLsof, parseLog, bar, bandText, suggestedRules, withAllowed, parseClaudeAgents,
-  asArray, sanitize, callKey,
+  asArray, sanitize, callKey, monogram,
 } from '../hooks/lib.js'
+import { ink, termName, projectColor } from '../hooks/draw.js'
 
 const PROJECTS = `# Projects
 
@@ -18,6 +19,31 @@ test('projects come back in priority order with ~ expanded', async () => {
   expect(p.map((x) => x.name)).toEqual(['CallFlow', 'qaps'])
   expect(p[0].path).toBe('/Users/g/code/callflow')
   expect(p[0].repo).toBe('garrettyarmo/callflow')
+})
+
+test('a project color comes from the Color column; an older table without one gives null', async () => {
+  const md = '| Priority | Project | Path | Repo | Color | Notes |\n|---|---|---|---|---|---|\n| 1 | CallFlow | `~/code/callflow` | `garrettyarmo/callflow` | `#017272` | Pilot |\n| 2 | Bison Brain | `~/code/bisonbrain` | `garrettyarmo/bisonbrain` | `orange` | not a hex |\n'
+  expect(parseProjects(md, '/h').map((x) => x.color)).toEqual(['#017272', null])
+  expect(parseProjects(PROJECTS, '/h').map((x) => x.color)).toEqual([null, null])
+  expect(projectColor({ color: '#f48327' }, 0)).toBe('#F48327')
+  expect([0, 1, 2].map((i) => projectColor({ color: null }, i))).toEqual(['#017272', '#F48327', '#5B5BD6'])
+})
+
+test('a badge is two letters, camel case counting as two words', async () => {
+  expect(['CallFlow', 'Bison Brain', 'g-cauc', 'qaps', 'X', ''].map(monogram)).toEqual(['CF', 'BB', 'gc', 'qa', 'X', '?'])
+})
+
+test('text on a project color is white or near black by contrast, and a terminal gets the nearest named color', async () => {
+  expect([ink('#017272'), ink('#F48327'), ink('#5B5BD6')]).toEqual(['#FFFFFF', '#111111', '#FFFFFF'])
+  expect(['#017272', '#F48327', '#5B5BD6', '#E5484D', '#22A06B', '#8A8F98'].map(termName)).toEqual(['cyan', 'yellow', 'blue', 'red', 'green', 'gray'])
+})
+
+test('merged 24h counts only merges in the day before now', async () => {
+  const now = Date.parse('2026-10-05T12:00:00Z')
+  const mergedPrs = [{ number: 3, title: 'a', mergedAt: '2026-10-05T11:00:00Z' }, { number: 2, title: 'b', mergedAt: '2026-10-04T13:00:00Z' }, { number: 1, title: 'c', mergedAt: '2026-10-04T11:00:00Z' }]
+  const s = summarizeProject({ issues: [], openPrs: [], mergedPrs, roadmap: '', specs: [], autonomy: 'attended', now })
+  expect(s.mergedToday).toBe(2)
+  expect(summarizeProject({ issues: [], openPrs: [], mergedPrs, roadmap: '', specs: [], autonomy: 'attended' }).mergedToday).toBe(0)
 })
 
 test('lanes parse max jobs and status', async () => {

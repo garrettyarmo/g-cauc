@@ -27,12 +27,20 @@ export function tableRows(md, firstHeader) {
 const strip = (s) => String(s || '').replace(/`/g, '').trim()
 const expandHome = (p, home) => strip(p).replace(/^~(?=\/|$)/, home)
 
-// projects.md: | Priority | Project | Path | Repo | Notes |
+// projects.md: | Priority | Project | Path | Repo | Color | Notes |
+// Color is optional (an older file has Notes in its place): a hex, or null.
 export function parseProjects(md, home) {
   return tableRows(md, 'Priority')
-    .map((c) => ({ priority: Number(c[0]) || 99, name: strip(c[1]), path: expandHome(c[2], home), repo: strip(c[3]) }))
+    .map((c) => ({ priority: Number(c[0]) || 99, name: strip(c[1]), path: expandHome(c[2], home), repo: strip(c[3]), color: /^#[0-9a-f]{6}$/i.test(strip(c[4])) ? strip(c[4]).toUpperCase() : null }))
     .filter((p) => p.name && p.path && p.repo)
     .sort((a, b) => a.priority - b.priority)
+}
+
+// A project's badge: the first letters of its first two words, camel case
+// counting as two words ("CallFlow" CF, "Bison Brain" BB, "g-cauc" gc).
+export function monogram(name) {
+  const words = String(name || '').replace(/([a-z])([A-Z])/g, '$1 $2').split(/[\s_-]+/).filter(Boolean)
+  return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).slice(0, 2)
 }
 
 // lanes.md: | Lane | Family | Subscription | Weight | Max jobs | Status |
@@ -138,7 +146,7 @@ export function blockers(body) {
 }
 
 // Everything the Plan tab and the band need for one project.
-export function summarizeProject({ issues, openPrs, mergedPrs, roadmap, specs, autonomy }) {
+export function summarizeProject({ issues, openPrs, mergedPrs, roadmap, specs, autonomy, now }) {
   const phases = parseRoadmap(roadmap)
   const byNumber = new Map(issues.map((i) => [i.number, i]))
   const isOpen = (n) => {
@@ -188,7 +196,11 @@ export function summarizeProject({ issues, openPrs, mergedPrs, roadmap, specs, a
     ready,
     needs,
     ideas: open.filter((i) => has(i, 'idea')).length,
+    // Open PRs other than spec PRs: work in review or CI, however the project labels its issues.
+    openPrs: openPrs.filter((p) => !labelsOf(p).includes('spec')).length,
     merged: mergedPrs.slice(0, 4),
+    // Merges in the 24 hours before now, from the PRs gh returned.
+    mergedToday: now ? mergedPrs.filter((p) => now - Date.parse(p.mergedAt) < 86_400_000).length : 0,
   }
 }
 

@@ -40,7 +40,7 @@ Then a ruleset on main: pull request required, required status checks (the CI jo
 
 ## 5. Register
 
-Add the project to `~/code/g-cauc/projects.md` with Garrett's priority.
+Add the project to `~/code/g-cauc/projects.md` with Garrett's priority, and its accent color from its own `BRAND.md` as hex in the Color column.
 
 ## 6. Going unattended
 
