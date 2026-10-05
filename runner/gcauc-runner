@@ -115,11 +115,17 @@ sweep() {
 }
 
 # Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
-# registration still listed (even as online, until GitHub notices) has nothing behind it.
+# registration still listed (even as online, until GitHub notices) has nothing behind it. drain calls
+# it with jobs running: GitHub refuses to delete a runner that runs a job, and an idle runner whose
+# registration is gone exits within a minute.
 prune_stale() {
-  local repo="$1" id
-  for id in $(gh api "repos/$repo/actions/runners?per_page=100" --jq \
-    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null); do
+  local repo="$1" ids id
+  if ! ids="$(gh api "repos/$repo/actions/runners?per_page=100" --jq \
+    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null)"; then
+    log "$repo: could not list runners, so no idle runner was deleted"
+    return 0
+  fi
+  for id in $ids; do
     gh api -X DELETE "repos/$repo/actions/runners/$id" >/dev/null 2>&1 || true
   done
 }
@@ -130,10 +136,6 @@ slot() {
   # Per repo and slot, so a slot's sweep removes only what that slot started.
   local work="_work-$short-$n" name jit status
   while true; do
-    if [ -e "$drain_file" ]; then
-      log "$repo slot $n: draining, so this slot stops"
-      return 0
-    fi
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
       -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
@@ -142,6 +144,12 @@ slot() {
       log "$repo slot $n: could not mint a runner config; retrying in 60 s"
       sleep 60
       continue
+    fi
+    # Check after the mint: drain writes the file and then lists runners, so it either deletes this
+    # runner or this check sees the file. The next serve prunes the unused registration.
+    if [ -e "$drain_file" ]; then
+      log "$repo slot $n: draining, so this slot stops"
+      return 0
     fi
     log "$repo slot $n: $name is waiting for a job in $vm"
     status=0
@@ -195,20 +203,15 @@ cmd_serve() {
   log "every slot stopped (drain); exiting so the agent starts serve again"
 }
 
-# Start no new job, and remove each idle runner's container (it waits for a job that must not come).
+# Start no new job, and delete each idle runner on GitHub (it waits for a job that must not come).
 # Busy slots finish their jobs and stop; then serve exits and the launchd agent starts it again.
 cmd_drain() {
-  local l name n short
+  local l
   load_repos
   touch "$drain_file"
   for l in ${lines[@]+"${lines[@]}"}; do
     parse "$l"
-    short="${repo##*/}"
-    for name in $(gh api "repos/$repo/actions/runners?per_page=100" --jq \
-      ".runners[] | select(.busy == false and (.name | startswith(\"$host-$short-\"))) | .name" 2>/dev/null); do
-      n="${name#"$host-$short-"}"
-      in_vm "$vm" docker rm -f "gcauc-$short-${n%%-*}" </dev/null >/dev/null 2>&1 || true
-    done
+    prune_stale "$repo"
   done
   log "drain: no slot takes a new job; running jobs finish, then serve exits and the agent starts it again"
 }
