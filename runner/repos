@@ -3,3 +3,5 @@
 # on its next restart (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
 garrettyarmo/callflow 2
 garrettyarmo/bisonbrain 2
+garrettyarmo/myqap 2
+garrettyarmo/nessy 1
