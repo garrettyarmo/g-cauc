@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, latestChecks, summarizeCi, ciBand, slotStates } from '../hooks/ci.js'
+import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, latestChecks, summarizeCi, ciBand, slotStates, vmName } from '../hooks/ci.js'
 
 test('done timing lines: green and over budget', async () => {
   const t = doneTimings('x\ndone --fast: green in 127s\n\ndone --full: 1620s is over the 1500s budget\nnoise')
@@ -97,4 +97,12 @@ test('review round 1: stuck reads slots, not registrations, and every runner sho
   expect(ci([reg('m-callflow-1-9', 1, true)], 0).pool.slots).toEqual(['busy'])
   expect(ci([reg('m-1-1', 1, false)], 0).stuck).toBe(1)
   expect(ci([], 0).pool.slots).toEqual([])
+})
+
+test('a repo VM is named as runner/gcauc-runner names it, and runner/repos may carry CPUs and memory', async () => {
+  expect(['garrettyarmo/callflow', 'garrettyarmo/My_Repo.v2', 'nessy'].map(vmName)).toEqual(['gcauc-callflow', 'gcauc-my-repo-v2', 'gcauc-nessy'])
+  expect(parseRepoSlots('garrettyarmo/callflow 2 12 12\ngarrettyarmo/nessy 1 # quiet\n')).toEqual([
+    { repo: 'garrettyarmo/callflow', slots: 2 },
+    { repo: 'garrettyarmo/nessy', slots: 1 },
+  ])
 })

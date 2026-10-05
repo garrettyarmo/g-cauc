@@ -1,13 +1,15 @@
-# The g-cauc runner VM: a Linux machine on the Mac that runs CI jobs in throwaway containers.
+# A g-cauc runner VM: a Linux machine on the Mac that runs one repo's CI jobs in throwaway
+# containers. gcauc-runner makes one VM per repo from this file, with the CPUs and memory
+# that runner/repos gives that repo (the values below are only defaults).
 # No host mounts (jobs never see ~/.config, ~/.aws, ~/.ssh), no port forwarding to the Mac
 # (job services never collide with a worktree's dev ports), no SSH agent forwarding.
 minimumLimaVersion: 2.0.0
 base:
 - template:_images/ubuntu-24.04
 vmType: vz
-cpus: 12
-memory: 32GiB
-disk: 150GiB
+cpus: 4
+memory: 4GiB
+disk: 100GiB
 mounts: []
 ssh:
   forwardAgent: false

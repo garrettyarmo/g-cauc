@@ -75,7 +75,13 @@ export function parseRunners(text) {
   }))
 }
 
-// runner/repos: "owner/repo slots" per line, # comments.
+// The runner VM of a repo, named as runner/gcauc-runner names it: gcauc-<repo>, lower case,
+// anything but a letter, a digit or a dash made a dash.
+export function vmName(repo) {
+  return 'gcauc-' + String(repo || '').split('/').pop().toLowerCase().replace(/[^a-z0-9-]/g, '-')
+}
+
+// runner/repos: "owner/repo slots [cpus] [memory GiB]" per line, # comments.
 export function parseRepoSlots(text) {
   return String(text || '')
     .split('\n')

@@ -1,7 +1,10 @@
-# Repositories the g-cauc runner pool serves: owner/repo and how many jobs it runs at once.
-# Add a line when a project adopts g-cauc (the adopt skill); `gcauc-runner install` picks it up
-# on its next restart (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
-garrettyarmo/callflow 2
-garrettyarmo/bisonbrain 2
-garrettyarmo/myqap 2
-garrettyarmo/nessy 1
+# Repositories the g-cauc runner pool serves, one VM each (gcauc-<repo>):
+#   owner/repo  slots  CPUs  memory GiB
+# Slots are jobs at once. CPUs are shared with the Mac and the other VMs (a quiet VM uses almost
+# none); memory is the VM's own, so the total must leave the Mac room (64 GiB, 2026-10-05).
+# Add a line when a project adopts g-cauc (the adopt skill), then run `gcauc-runner up` and
+# restart the agent with no job running (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
+garrettyarmo/callflow 2 12 12
+garrettyarmo/bisonbrain 2 8 8
+garrettyarmo/myqap 2 8 8
+garrettyarmo/nessy 1 2 3

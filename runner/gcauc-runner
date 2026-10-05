@@ -1,18 +1,18 @@
 #!/bin/bash
 # gcauc-runner: the g-cauc CI runner pool on this Mac (see runner/README.md).
-#   gcauc-runner up         create or start the runner VM and build the job image
+#   gcauc-runner up         create or start each repo's VM and build its job image
 #   gcauc-runner serve      keep the slots in runner/repos registered and running jobs (foreground)
-#   gcauc-runner status     the VM, the running job containers, and each repo's g-cauc runners
-#   gcauc-runner rebuild    rebuild the job image from runner/image/Dockerfile
+#   gcauc-runner status     each VM, its running job containers, and each repo's g-cauc runners
+#   gcauc-runner rebuild    rebuild the job image in each VM from runner/image/Dockerfile
 #   gcauc-runner install    run `serve` at login and keep it running (a launchd agent)
 #   gcauc-runner uninstall  remove that agent and stop serving
-# Each job runs in a fresh container registered with a one-job (just-in-time) runner config.
-# The config is minted here, with this Mac's gh login, so no reusable GitHub credential ever
-# enters the VM.
+# Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
+# with another project's. Each job runs in a fresh container registered with a one-job
+# (just-in-time) runner config. The config is minted here, with this Mac's gh login, so no
+# reusable GitHub credential ever enters a VM.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-vm="${GCAUC_RUNNER_VM:-gcauc-ci}"
 label=gcauc
 repos_file="$here/repos"
 logdir="$HOME/Library/Logs/gcauc-runner"
@@ -24,36 +24,76 @@ host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
 case "$(uname -m)" in arm64 | aarch64) arch=ARM64 ;; *) arch=X64 ;; esac
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
-in_vm() { limactl shell --workdir / "$vm" -- "$@"; }
+# stdin stays with the caller only when the command needs it (a job's config); loops that read
+# runner/repos must not lose their input to limactl shell, so they pass </dev/null.
+in_vm() {
+  local vm="$1"
+  shift
+  limactl shell --workdir / "$vm" -- "$@"
+}
 
-repos() { grep -vE '^[[:space:]]*(#|$)' "$repos_file"; }
+# runner/repos: "owner/repo slots [cpus] [memory GiB]" per line, # comments.
+# CPUs default to 4 per slot and memory to 4 GiB per slot.
+lines=()
+load_repos() {
+  local l
+  lines=()
+  while IFS= read -r l; do lines+=("$l"); done < <(sed 's/#.*//' "$repos_file" | awk 'NF >= 2')
+}
+# Sets repo, slots, cpus, mem and vm from one runner/repos line.
+parse() {
+  read -r repo slots cpus mem _ <<<"$1"
+  cpus="${cpus:-$((slots * 4))}"
+  mem="${mem:-$((slots * 4))}"
+  vm="gcauc-$(printf '%s' "${repo##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
+}
 
-cmd_up() {
+up_vm() {
   if ! limactl list -q 2>/dev/null | grep -qx "$vm"; then
-    limactl create --name "$vm" --tty=false "$here/lima.yaml"
+    limactl create --name "$vm" --cpus "$cpus" --memory "$mem" --tty=false "$here/lima.yaml" </dev/null
   fi
   if [ "$(limactl list "$vm" --format '{{.Status}}')" != Running ]; then
-    limactl start "$vm" --tty=false
+    limactl start "$vm" --tty=false </dev/null
   fi
   # A VM that can see the Mac's files would let any job read ~/.config, ~/.aws or ~/.ssh.
   if [ "$(limactl list "$vm" --format '{{len .Config.Mounts}}')" != 0 ]; then
     echo "gcauc-runner: $vm mounts host directories; delete it (limactl delete -f $vm) and run up again" >&2
     exit 1
   fi
-  in_vm docker image inspect "$image" >/dev/null 2>&1 || cmd_rebuild
+  local have_cpus have_mem
+  have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
+  have_mem="$(($(limactl list "$vm" --format '{{.Memory}}') / 1073741824))"
+  if [ "$have_cpus" != "$cpus" ] || [ "$have_mem" != "$mem" ]; then
+    log "$vm has $have_cpus CPUs and $have_mem GiB; runner/repos asks for $cpus and $mem. To resize it with no job running: limactl stop $vm && limactl edit $vm --cpus $cpus --memory $mem && limactl start $vm"
+  fi
+  in_vm "$vm" docker image inspect "$image" </dev/null >/dev/null 2>&1 || in_vm "$vm" docker build -q -t "$image" - <"$here/image/Dockerfile"
+}
+
+cmd_up() {
+  local l
+  load_repos
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    up_vm
+  done
 }
 
 cmd_rebuild() {
-  in_vm docker build -q -t "$image" - <"$here/image/Dockerfile"
+  local l
+  load_repos
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    in_vm "$vm" docker build -q -t "$image" - <"$here/image/Dockerfile"
+  done
 }
 
-# Remove what a slot's job left in the VM's Docker: compose projects under its work folder.
+# Remove what a slot's job left in its VM's Docker: compose projects under its work folder.
 sweep() {
-  local dir="$1"
-  in_vm sh -c "docker ps -aq --filter label=com.docker.compose.project.working_dir \
+  local vm="$1" dir="$2"
+  in_vm "$vm" sh -c "docker ps -aq --filter label=com.docker.compose.project.working_dir \
     | xargs -r docker inspect --format '{{.Id}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}' \
-    | awk -v d='$dir' 'index(\$2, d) == 1 { print \$1 }' | xargs -r docker rm -fv" >/dev/null 2>&1 || true
-  in_vm docker network prune -f --filter until=10m >/dev/null 2>&1 || true
+    | awk -v d='$dir' 'index(\$2, d) == 1 { print \$1 }' | xargs -r docker rm -fv" </dev/null >/dev/null 2>&1 || true
+  in_vm "$vm" docker network prune -f --filter until=10m </dev/null >/dev/null 2>&1 || true
 }
 
 # Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
@@ -67,10 +107,9 @@ prune_stale() {
 }
 
 slot() {
-  local repo="$1" n="$2" gid="$3" cpuset="$4"
+  local repo="$1" n="$2" gid="$3" cpuset="$4" vm="$5"
   local short="${repo##*/}"
-  # Per repo and slot: the sweep below removes everything under this folder, so two repos'
-  # slot 1 must never share it (a bisonbrain job's sweep once removed a CallFlow job's Postgres).
+  # Per repo and slot, so a slot's sweep removes only what that slot started.
   local work="_work-$short-$n" name jit status
   while true; do
     name="$host-$short-$n-$(date +%s)"
@@ -82,58 +121,65 @@ slot() {
       sleep 60
       continue
     fi
-    log "$repo slot $n: $name is waiting for a job"
+    log "$repo slot $n: $name is waiting for a job in $vm"
     status=0
     # The config goes in on stdin, so it never appears in this Mac's process list.
-    printf '%s\n' "$jit" | in_vm docker run --rm -i --name "gcauc-$short-$n" --network host \
+    printf '%s\n' "$jit" | in_vm "$vm" docker run --rm -i --name "gcauc-$short-$n" --network host \
       --cpuset-cpus "$cpuset" \
       --group-add "$gid" -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint bash "$image" -c 'read -r JIT; exec ./run.sh --jitconfig "$JIT"' \
       >>"$logdir/$short-$n.log" 2>&1 || status=$?
-    sweep "/home/runner/$work/"
+    sweep "$vm" "/home/runner/$work/"
     log "$repo slot $n: $name finished (exit $status)"
     [ "$status" -eq 0 ] || sleep 10
+  done
+}
+
+# Remove every job container in the VMs that runner/repos names.
+clear_vms() {
+  local l
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' </dev/null >/dev/null 2>&1 || true
   done
 }
 
 cmd_serve() {
   mkdir -p "$logdir"
   cmd_up
-  local gid repo slots n pids=() cpus total=0 per windows g=0
-  gid="$(in_vm stat -c %g /var/run/docker.sock)"
-  # Each slot gets its own CPUs, so a job sees (and sizes its test workers to) its share
-  # instead of every job starting one worker per VM CPU.
-  cpus="$(in_vm nproc)"
-  while read -r repo slots; do total=$((total + slots)); done < <(repos)
-  # At least GCAUC_SLOT_CPUS (6) per slot; when slots outnumber the CPU windows, they share a
-  # window, which is fine because most slots of a quiet repo sit idle.
-  per=$((cpus / total))
-  [ "$per" -ge "${GCAUC_SLOT_CPUS:-6}" ] || per="${GCAUC_SLOT_CPUS:-6}"
-  [ "$per" -le "$cpus" ] || per="$cpus"
-  windows=$((cpus / per))
-  in_vm sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' >/dev/null 2>&1 || true
-  while read -r repo slots; do
+  local l gid ncpu per windows n pids=()
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    gid="$(in_vm "$vm" stat -c %g /var/run/docker.sock </dev/null)"
+    # Each slot gets its own CPUs of its VM, so a job sees (and sizes its test workers to) its
+    # share instead of every job starting one worker per VM CPU.
+    ncpu="$(in_vm "$vm" nproc </dev/null)"
+    per=$((ncpu / slots))
+    [ "$per" -ge 1 ] || per=1
+    windows=$((ncpu / per))
+    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' </dev/null >/dev/null 2>&1 || true
     prune_stale "$repo"
     for n in $(seq 1 "$slots"); do
-      slot "$repo" "$n" "$gid" "$(((g % windows) * per))-$(((g % windows) * per + per - 1))" &
-      g=$((g + 1))
+      slot "$repo" "$n" "$gid" "$((((n - 1) % windows) * per))-$((((n - 1) % windows) * per + per - 1))" "$vm" </dev/null &
       pids+=($!)
     done
-  done < <(repos)
-  trap 'kill "${pids[@]}" 2>/dev/null; in_vm sh -c "docker ps -q --filter name=^gcauc- | xargs -r docker rm -f" >/dev/null 2>&1; exit 0' TERM INT
-  log "serving ${#pids[@]} slots"
+  done
+  trap 'kill "${pids[@]}" 2>/dev/null; clear_vms; exit 0' TERM INT
+  log "serving ${#pids[@]} slots in ${#lines[@]} VMs"
   wait
 }
 
 cmd_status() {
-  limactl list "$vm" --format '{{.Name}} {{.Status}} cpus={{.CPUs}} memory={{.Memory}} mounts={{len .Config.Mounts}}' 2>/dev/null || echo "$vm: not created"
-  in_vm docker ps --filter name=^gcauc- --format '{{.Names}} {{.Status}}' 2>/dev/null || true
-  local repo slots
-  while read -r repo slots; do
+  local l
+  load_repos
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    limactl list "$vm" --format '{{.Name}} {{.Status}} cpus={{.CPUs}} memory={{.Memory}} mounts={{len .Config.Mounts}}' 2>/dev/null || echo "$vm: not created"
+    in_vm "$vm" docker ps --filter name=^gcauc- --format '  {{.Names}} {{.Status}}' </dev/null 2>/dev/null || true
     echo "$repo ($slots slots):"
     gh api "repos/$repo/actions/runners?per_page=100" --jq \
       ".runners[] | select([.labels[].name] | index(\"$label\")) | \"  \(.name) \(.status) busy=\(.busy)\""
-  done < <(repos)
+  done
   if launchctl print "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1; then echo "launchd: com.gcauc.runner loaded"; else echo "launchd: not installed"; fi
 }
 
@@ -162,7 +208,8 @@ EOF
 cmd_uninstall() {
   launchctl bootout "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1 || true
   rm -f "$plist"
-  in_vm sh -c 'docker ps -q --filter name=^gcauc- | xargs -r docker rm -f' >/dev/null 2>&1 || true
+  load_repos
+  clear_vms
   echo "uninstalled"
 }
 

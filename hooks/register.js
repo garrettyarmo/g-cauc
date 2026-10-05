@@ -8,7 +8,7 @@ import {
   fmtDuration, parseLsof, parseLog, bar, bandText, suggestedRules, withAllowed, labelsOf, parseClaudeAgents,
   asArray, sanitize, callKey, monogram,
 } from './lib.js'
-import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, summarizeCi, ciBand } from './ci.js'
+import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, summarizeCi, ciBand, vmName } from './ci.js'
 import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline, projectColor, paint } from './draw.js'
 
 const PANE = 'g-cauc-board'
@@ -39,8 +39,9 @@ let recent = []
 let lanes = []
 let claudeLimits = []
 let refreshedAt = 0
-// CI across projects: { at, vm, projects: [{ name, repo, key, ci, error }], billing }
-let ci = { at: 0, vm: '', projects: [], billing: null }
+// CI across projects: { at, projects: [{ name, repo, key, vm, ci, error }], billing }. vm is the
+// state of the project's own runner VM, or '' when the pool does not serve the repo.
+let ci = { at: 0, projects: [], billing: null }
 let ghLogin = null
 let billingAt = 0
 let lastError = ''
@@ -399,10 +400,10 @@ async function runFacts($, repo, run) {
 
 async function gatherCi($, cached, now) {
   const repoSlots = parseRepoSlots(await readText($, kitDir + '/runner/repos'))
-  const vm = repoSlots.length ? ((await sh($, ['limactl', 'list', 'gcauc-ci', '--format', '{{.Status}}'])) || '').trim() || 'not created' : ''
   const out = []
   for (const p of projects) {
     const key = p.path.split('/').pop()
+    const vm = repoSlots.some((x) => x.repo === p.repo) ? ((await sh($, ['limactl', 'list', vmName(p.repo), '--format', '{{.Status}}'])) || '').trim() || 'not created' : ''
     try {
       if (!repoOk(p.repo)) throw new Error('not a GitHub repo name: ' + p.repo)
       const runs = parseRuns(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runs?per_page=40`]))
@@ -443,13 +444,13 @@ async function gatherCi($, cached, now) {
       for (const k of await $.store.keys()) if (k.startsWith('ci-run\u0000' + p.repo + '\u0000') && !keep.has(k)) await $.store.delete(k)
       const budgets = budgetsFromDone(await readMain($, p.path, 'scripts/done'))
       const slotCount = (repoSlots.find((x) => x.repo === p.repo) || {}).slots ?? null
-      out.push({ name: p.name, repo: p.repo, key, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now, behind }) })
+      out.push({ name: p.name, repo: p.repo, key, vm, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now, behind }) })
     } catch (err) {
       const before = [...ci.projects, ...((cached && cached.projects) || [])].find((x) => x.repo === p.repo && x.ci)
-      out.push({ name: p.name, repo: p.repo, key, ci: before ? before.ci : null, stale: true, error: String((err && err.message) || err) })
+      out.push({ name: p.name, repo: p.repo, key, vm, ci: before ? before.ci : null, stale: true, error: String((err && err.message) || err) })
     }
   }
-  return { at: now, vm, projects: out, billing: await billing($, cached) }
+  return { at: now, projects: out, billing: await billing($, cached) }
 }
 
 // Actions minutes this month, when the gh token has the user scope; checked every 10 minutes.
@@ -865,11 +866,15 @@ function fleetView($, E, width, surface) {
       ])
     })))
   }
-  const pools = ci.projects.filter((c) => c.ci && c.ci.pool.slots.length)
-  if (ci.vm || pools.length) {
-    const rows = [row(E, [Text({ children: ['VM'] }), ci.vm ? pill(E, surface, 'VM ' + ci.vm.toLowerCase(), /running/i.test(ci.vm) ? 'good' : 'bad') : Text({ dimColor: true, children: ['unknown'] })])]
-    const widest = Math.max(1, ...pools.map((c) => c.ci.pool.slots.length))
-    for (const c of pools) rows.push(row(E, [projectBadge(E, surface, c.key, 14), poolCells(E, surface, c.ci, colorOf(c.key), widest), Text({ dimColor: true, children: [`${c.ci.pool.busy} busy · ${c.ci.pool.idle} idle${c.ci.pool.offline ? ` · ${c.ci.pool.offline} offline` : ''}`] })]))
+  // Each project the pool serves has its own VM: its slots, then the VM's state.
+  const pools = ci.projects.filter((c) => c.vm || (c.ci && c.ci.pool.slots.length))
+  if (pools.length) {
+    const widest = Math.max(1, ...pools.map((c) => (c.ci ? c.ci.pool.slots.length : 0)))
+    const rows = pools.map((c) => row(E, [
+      projectBadge(E, surface, c.key, 14),
+      ...(c.ci ? [poolCells(E, surface, c.ci, colorOf(c.key), widest), Text({ dimColor: true, children: [`${c.ci.pool.busy} busy · ${c.ci.pool.idle} idle${c.ci.pool.offline ? ` · ${c.ci.pool.offline} offline` : ''}`] })] : []),
+      ...(c.vm ? [pill(E, surface, 'VM ' + c.vm.toLowerCase(), /running/i.test(c.vm) ? 'good' : 'bad')] : []),
+    ]))
     out.push(section(E, 'Runner pool', rows))
   }
   const b = ci.billing
