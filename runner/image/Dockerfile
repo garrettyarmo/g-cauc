@@ -10,8 +10,9 @@ ARG COMPOSE_SHA256_AMD64=40343e21ca777173e69cff5dbafeb37c6f81f3b0d57d9e597f036e9
 RUN set -eux; \
     apt-get update; \
     # libatomic1: Node's arm64 builds need it (setup-node failed without it on the first job).
+    # rsync: GitHub's hosted runners have it, and CallFlow's fail-closed test uses it (PR 202).
     apt-get install -y --no-install-recommends postgresql-client openssl xz-utils zstd libatomic1 \
-      build-essential pkg-config; \
+      build-essential pkg-config rsync; \
     rm -rf /var/lib/apt/lists/*; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
       arm64) asset=aarch64; sum="$COMPOSE_SHA256_ARM64" ;; \
