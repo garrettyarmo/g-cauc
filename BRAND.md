@@ -26,7 +26,7 @@ There are two types of color, and each type has one job.
 
 Rules for project colors:
 
-- A project color shows only on that project's badge, card outline, phase ring, pipeline nodes, slots and lane cells.
+- A project color shows only on that project's badge, phase ring, pipeline nodes, slots and lane cells.
 - A project color never shows a status, and it is never the color of a line of text.
 - Each page has one project color at most, except the All page and the Fleet page. On those two pages, the project colors identify the projects.
 - Text on a filled shape is white or `#111111`, whichever has the higher contrast.
@@ -38,7 +38,7 @@ The SVGs use the system UI font. A badge or a pill uses 11px at weight 600. A pi
 ## Shape and space
 
 - A square cell is 14px with a 4px radius. A pill and a ring are round.
-- A card has a round border in its project color and one column of padding at the left and right.
+- A card has no border. Its badge shows the project. The Desktop app showed no pane after version 0.6.0 added borders, percent widths and wrapping (2026-10-05). The board before 0.6.0 used none of them.
 - Rows in a section have no gap. Sections have one empty row between them.
 
 ## Motion

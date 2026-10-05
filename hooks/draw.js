@@ -62,12 +62,6 @@ function svg(E, w, h, body, alt) {
   return E.Svg({ source: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`, alt: sanitize(alt, 200), width: w, height: h })
 }
 
-// A color for an element prop (a border): the hex on the Desktop app, the named color in a terminal.
-export function paint(surface, name) {
-  const t = tone(name)
-  return surface === 'desktop' ? t.hex : t.term
-}
-
 // Text in a tone: a hex on the Desktop app, a named color in a terminal.
 export function colored(E, surface, name, text, extra = {}) {
   text = sanitize(text, 2000)

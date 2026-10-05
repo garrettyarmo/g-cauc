@@ -383,9 +383,12 @@ test('each project is drawn in its own color from projects.md, and a project wit
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
     await clock.advance(2000)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-    // The All page: one card per project, outlined in its color (Bison Brain has none, so the second fallback)
+    // The All page: one card per project, each with a badge in its color (Bison Brain has none, so the second fallback).
+    // No borders, percent widths or wrapping: the Desktop app showed no pane after 0.6.0 added them (2026-10-05).
     const cards = (await ui.findAll({ type: 'Box' })).filter((b) => b.key && b.key.startsWith('card-'))
-    expect(cards.map((c) => [c.key, c.props.borderColor])).toEqual([['card-callflow', '#017272'], ['card-bisonbrain', '#F48327']])
+    expect(cards.map((c) => c.key)).toEqual(['card-callflow', 'card-bisonbrain'])
+    const boxes = await ui.findAll({ type: 'Box' })
+    expect(boxes.some((b) => b.props.borderStyle || b.props.flexWrap || typeof b.props.width === 'string')).toBe(false)
     const svgs = (await ui.findAll({ type: 'Svg' })).map((s) => String(s.props.source))
     expect(svgs.some((s) => s.includes('#017272') && s.includes('>CF<'))).toBe(true)
     expect(svgs.some((s) => s.includes('#F48327') && s.includes('>BB<'))).toBe(true)
@@ -400,11 +403,11 @@ test('each project is drawn in its own color from projects.md, and a project wit
     const grok = (await ui.findAll({ type: 'Svg' })).find((s) => s.props.alt === '1 of 6 grok jobs')
     expect(String(grok && grok.props.source)).toContain('fill="#017272"')
     await ui.unmount()
-    // A terminal draws the card border in the nearest named color
+    // A terminal draws each badge in the nearest named color
     const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
     await term.press({ key: 'tab-all' })
-    const tcards = (await term.findAll({ type: 'Box' })).filter((b) => b.key && b.key.startsWith('card-'))
-    expect(tcards.map((c) => c.props.borderColor)).toEqual(['cyan', 'yellow'])
+    expect((await term.find({ type: 'Text', text: /^CF$/ })).props.color).toBe('cyan')
+    expect((await term.find({ type: 'Text', text: /^BB$/ })).props.color).toBe('yellow')
     await term.unmount()
   } finally {
     FILES['/home/code/g-cauc/projects.md'] = before
@@ -483,5 +486,23 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
     expect(saved.get('gh-pause')).toBeDefined()
   } finally {
     world.rateLimited = false
+  }
+})
+
+test('a lane limit file with a test-job line under the reset time still shows the lane as out', async ($, on) => {
+  const before = FILES['/home/code/g-cauc/limits/codex']
+  FILES['/home/code/g-cauc/limits/codex'] = '2099-10-06T15:21:00-05:00\ntest callflow#12\n'
+  try {
+    const saved = new Map<string, unknown>()
+    const clock = mock.clock(on, { now: Date.now() })
+    stubWorld(on, saved, [])
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-fleet' })
+    expect(await ui.find({ type: 'Text', text: /out until 10-06 15:21/ })).toBeDefined()
+    await ui.unmount()
+  } finally {
+    FILES['/home/code/g-cauc/limits/codex'] = before
   }
 })

@@ -9,7 +9,7 @@ import {
   asArray, sanitize, callKey, monogram,
 } from './lib.js'
 import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, budgetsFromDone, refusalMessage, summarizeCi, ciBand, vmName } from './ci.js'
-import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline, projectColor, paint } from './draw.js'
+import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline, projectColor } from './draw.js'
 
 const PANE = 'g-cauc-board'
 // GitHub budget. Every Claude Code session on the Mac runs this module, and
@@ -361,7 +361,8 @@ async function withLaneState($, base) {
   const now = Date.now()
   const result = []
   for (const l of base) {
-    const until = (await readText($, kitDir + '/limits/' + l.lane)).trim()
+    // The first line is the reset time; the foreman may add a line naming its test job.
+    const until = (await readText($, kitDir + '/limits/' + l.lane)).split('\n')[0].trim()
     const out = until && Date.parse(until) > now ? until : ''
     result.push({ ...l, running: jobs.filter((j) => j.lane === l.lane).length, outUntil: out })
   }
@@ -622,7 +623,7 @@ function boardView($, E, width, surface) {
   else if (tab === 'job') body = jobView($, E, width, surface)
   else if (tab.startsWith('p-')) body = projectView($, E, projects.find((p) => projectTab(p) === tab), width, surface)
   else body = overviewView($, E, width, surface)
-  return Box({ flexDirection: 'column', rowGap: 1, children: [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 3, children: nav }), status, Box({ flexDirection: 'column', rowGap: 1, children: body })] })
+  return Box({ flexDirection: 'column', rowGap: 1, children: [Box({ flexDirection: 'row', columnGap: 3, children: nav }), status, Box({ flexDirection: 'column', rowGap: 1, children: body })] })
 }
 
 // Cut text to n columns, so a row stays one line in a narrow pane.
@@ -693,11 +694,10 @@ function modelsOf(list) {
 function overviewView($, E, width, surface) {
   const { Text, Box } = E
   if (projects.length === 0) return [Text({ dimColor: true, children: [refreshedAt ? 'No projects in ' + kitDir.replace(home, '~') + '/projects.md.' : 'Reading GitHub…'] })]
-  const two = width >= 92 && projects.length > 1
-  return [Box({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2, rowGap: 1, children: projects.map((p) => projectCard($, E, p, two ? '49%' : '100%', two ? Math.floor(width / 2) - 6 : width - 4, surface)) })]
+  return projects.map((p) => projectCard($, E, p, width - 2, surface))
 }
 
-function projectCard($, E, p, cardWidth, inner, surface) {
+function projectCard($, E, p, inner, surface) {
   const { Box, Text, Button } = E
   const s = p.summary
   const hex = colorOf(p.key)
@@ -720,7 +720,7 @@ function projectCard($, E, p, cardWidth, inner, surface) {
   }
   children.push(Button({ key: 'open-' + p.key, label: `Open ${p.name} ›`, plain: true, dimColor: true, onPress: () => { tab = projectTab(p); $.ui.invalidate('ui.render') } }))
   if (p.error) children.push(colored(E, surface, 'bad', fit(p.error, Math.max(20, inner))))
-  return Box({ key: 'card-' + p.key, flexDirection: 'column', borderStyle: 'round', borderColor: paint(surface, hex), paddingX: 1, width: cardWidth, children })
+  return Box({ key: 'card-' + p.key, flexDirection: 'column', children })
 }
 
 // An issue or PR title by number, from what the board already read.
