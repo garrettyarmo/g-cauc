@@ -10,7 +10,10 @@ You run one pass and exit. You keep nothing between passes: GitHub, git and the 
 ## Before anything
 
 - If `~/code/g-cauc/STOP` exists, print its contents and exit.
-- Read `~/code/g-cauc/lanes.md`, `~/code/g-cauc/routing.md` and `~/code/g-cauc/projects.md`. A lane with an unexpired file in `~/code/g-cauc/limits/` is out, but for 1 hour at most at a time. An allowance can come back before the time in the file (a weekly reset, or more usage bought). When the file is more than 1 hour old, give that lane one job. If that job's log ends on a usage limit again, write the new reset time to the file. If it does not, delete the file: the lane is back.
+- Read `~/code/g-cauc/lanes.md`, `~/code/g-cauc/routing.md` and `~/code/g-cauc/projects.md`. A lane with an unexpired file in `~/code/g-cauc/limits/` is out: steps 5 and 7 give it no work. An allowance can come back before the time in the file (a weekly reset, or more usage bought), so test the lane once an hour:
+  - If the file is older than 1 hour and the lane has no live job, start one build there. Then touch the file, so the next test comes 1 hour later. This is the only job the lane gets.
+  - If that job's log ends on a usage limit, step 3 writes the new reset time.
+  - If that job runs for 5 minutes with no usage-limit message, delete the file. The lane is back.
 - Work only in projects whose AGENTS.md says `Autonomy: unattended`.
 - Touch only build issues and their PRs. Ideas and spec PRs belong to the product pass.
 
