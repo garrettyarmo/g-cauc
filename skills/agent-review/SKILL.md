@@ -20,6 +20,7 @@ You did not write this code and your model family has no commit on this branch. 
 - **Blocking** means a defect plus a command that fails right now: a test, a curl, a script. Without a failing command, it is advisory. Style is never blocking.
 - **Give blocking findings IDs.** B1, B2 and so on. In a recheck, report every earlier ID as `fixed` or `still failing` (with its repro output), and number any new ones after the last ID. The foreman uses these to tell progress from a stall.
 - **Round 2 and later are rechecks.** Verify the earlier blocking findings and the new diff, and that the fix broke nothing. Do not start a fresh hunt across the whole PR.
+- If you ran `scripts/dev up` to check something, run `scripts/dev down` before you stop.
 - At most two advisory findings become follow-up issues, each labeled `idea` and `from-review`. The product pass batches those into one hardening spec instead of one spec each (day 1 filed 20 of them).
 
 ## Report

@@ -29,6 +29,8 @@ If your sandbox cannot reach GitHub during a fix round, commit, write what chang
 
 ## When to stop
 
+Before you stop, for any reason, run `scripts/dev down` in your worktree. A stack that stays up keeps its containers and a Docker network. Docker on the Mac has a limited number of networks. On 2026-10-05, 21 old stacks used them all, and new builds could not start Postgres.
+
 - **Done:** the PR is open (or `AK_PR.md` is written) and your local checks are green, with their summary pasted in the PR.
 - **Stuck inside this job:** the same failure three times in a row with no change in what fails. Stop and report it in the PR (or `AK_FIX.md`) with the failing command and the tail of its output; the foreman decides whether a stronger lane takes the next round.
 - **The spec is wrong:** it is ambiguous or contradicts the code. Comment on the issue with the conflict, label it `needs:garrett` with one question and a default, and stop.
