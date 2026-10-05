@@ -488,3 +488,21 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
     world.rateLimited = false
   }
 })
+
+test('a lane limit file with a test-job line under the reset time still shows the lane as out', async ($, on) => {
+  const before = FILES['/home/code/g-cauc/limits/codex']
+  FILES['/home/code/g-cauc/limits/codex'] = '2099-10-06T15:21:00-05:00\ntest callflow#12\n'
+  try {
+    const saved = new Map<string, unknown>()
+    const clock = mock.clock(on, { now: Date.now() })
+    stubWorld(on, saved, [])
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.press({ key: 'tab-fleet' })
+    expect(await ui.find({ type: 'Text', text: /out until 10-06 15:21/ })).toBeDefined()
+    await ui.unmount()
+  } finally {
+    FILES['/home/code/g-cauc/limits/codex'] = before
+  }
+})

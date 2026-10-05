@@ -361,7 +361,8 @@ async function withLaneState($, base) {
   const now = Date.now()
   const result = []
   for (const l of base) {
-    const until = (await readText($, kitDir + '/limits/' + l.lane)).trim()
+    // The first line is the reset time; the foreman may add a line naming its test job.
+    const until = (await readText($, kitDir + '/limits/' + l.lane)).split('\n')[0].trim()
     const out = until && Date.parse(until) > now ? until : ''
     result.push({ ...l, running: jobs.filter((j) => j.lane === l.lane).length, outUntil: out })
   }
