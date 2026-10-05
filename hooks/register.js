@@ -12,7 +12,18 @@ import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, bud
 import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline, projectColor, paint } from './draw.js'
 
 const PANE = 'g-cauc-board'
-const STALE_MS = 45_000
+// GitHub budget. Every Claude Code session on the Mac runs this module, and
+// all of them share one GraphQL limit (5,000 an hour, across Garrett's tokens),
+// so the GitHub part of a refresh is shared: one session reads GitHub at a
+// time (the lease), not more often than the cadence, and every session stops
+// for a while after GitHub says "rate limit". Local data (jobs, logs, lanes)
+// still updates on every tick.
+const GH_OPEN_MS = 2 * 60_000 // a /board pane is open in some session
+const GH_QUIET_MS = 5 * 60_000 // nobody is looking: only the quiet line reads it
+const VIEWER_MS = 3 * 60_000 // a pane counts as open this long after its last tick
+const LEASE_MS = 2 * 60_000 // how long one session may hold the GitHub read
+const PAUSE_MS = 10 * 60_000 // the stop after a rate limit
+const ME = Math.random().toString(36).slice(2)
 // The CI snapshot's store key names its shape, so a session never reads a
 // snapshot an older version of the board wrote.
 const CI_SNAPSHOT = 'ci-snapshot-2'
@@ -33,6 +44,11 @@ let ci = { at: 0, vm: '', projects: [], billing: null }
 let ghLogin = null
 let billingAt = 0
 let lastError = ''
+// Set when a command's output says GitHub's rate limit is spent; read after a gather.
+let rateLimited = false
+let pausedUntil = 0
+// Open PRs per repo from this gather's project read, so the CI read reuses them.
+const openPrsByRepo = new Map()
 let busy = false
 let again = false
 
@@ -66,7 +82,8 @@ export function register(on, options) {
     }
     paneOpen = true
     await $.ui.open({ id: PANE, title: 'g-cauc', focus: true, closeOnEscape: true })
-    if (Date.now() - refreshedAt > STALE_MS) refresh($, true)
+    // Opening the board shows the shared snapshot at once and reads GitHub only when it is due.
+    refresh($, false)
     return {}
   })
 
@@ -147,6 +164,7 @@ export function register(on, options) {
 async function sh($, argv, cwd) {
   try {
     const r = await $.process.run(argv, cwd ? { cwd, timeoutMs: 30_000 } : { timeoutMs: 30_000 })
+    if (r.exitCode !== 0 && /API rate limit/i.test(String(r.stderr || '') + String(r.stdout || ''))) rateLimited = true
     return r.exitCode === 0 ? r.stdout : null
   } catch {
     return null
@@ -179,29 +197,50 @@ async function refresh($, force) {
   }
   busy = true
   let cached = null
+  let holding = false
   try {
+    const now = await $.clock.now()
+    if (paneOpen) await $.store.set('viewer', { at: now })
+    const viewer = await $.store.get('viewer')
+    const every = viewer && now - viewer.at < VIEWER_MS ? GH_OPEN_MS : GH_QUIET_MS
+    const pause = await $.store.get('gh-pause')
+    pausedUntil = pause && now < pause.until ? pause.until : 0
     cached = await $.store.get('snapshot')
-    if (!force && cached && Date.now() - cached.at < STALE_MS) {
-      projects = cached.projects
-      lanes = cached.lanes
-    } else {
+    const ciCached = await $.store.get(CI_SNAPSHOT)
+    lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
+    // A forced refresh (the Refresh button) skips the cadence and the lease, never the pause.
+    // 5 seconds of slack, so a read lands on the minute tick it is due on, not the next one.
+    let due = !pausedUntil && (force || !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= every - 5_000)
+    if (due && !force) {
+      const lease = await $.store.get('gh-lease')
+      if (lease && lease.by !== ME && now - lease.at < LEASE_MS) due = false
+    }
+    if (due) {
+      holding = true
+      await $.store.set('gh-lease', { at: now, by: ME })
+      rateLimited = false
+      openPrsByRepo.clear()
       projects = await gatherProjects($, cached)
-      lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
-      await $.store.set('snapshot', { at: Date.now(), projects, lanes })
+      await $.store.set('snapshot', { at: now, projects, lanes })
+      ci = await gatherCi($, ciCached, now)
+      await $.store.set(CI_SNAPSHOT, ci)
+      if (rateLimited) {
+        pausedUntil = now + PAUSE_MS
+        await $.store.set('gh-pause', { until: pausedUntil })
+      }
+      refreshedAt = now
+    } else {
+      if (cached) {
+        projects = cached.projects
+        refreshedAt = cached.at
+      }
+      if (ciCached) ci = ciCached
     }
     jobs = await gatherJobs($)
     recent = await gatherRecent($)
-    const ciCached = await $.store.get(CI_SNAPSHOT)
-    if (!force && ciCached && Date.now() - ciCached.at < STALE_MS) {
-      ci = ciCached
-    } else {
-      ci = await gatherCi($, ciCached)
-      await $.store.set(CI_SNAPSHOT, ci)
-    }
     lanes = await withLaneState($, lanes)
     allow = await loadAllow($)
     await toastNewNeeds($)
-    refreshedAt = Date.now()
     lastError = ''
   } catch (err) {
     lastError = String((err && err.message) || err)
@@ -215,6 +254,13 @@ async function refresh($, force) {
       }
     }
   } finally {
+    if (holding) {
+      try {
+        await $.store.delete('gh-lease')
+      } catch {
+        // the lease expires by itself
+      }
+    }
     busy = false
     $.ui.invalidate('ui.render')
     if (again) {
@@ -247,7 +293,8 @@ async function gatherProjects($, cached) {
   for (const p of list) {
     try {
       const issues = asArray(await sh($, ['gh', 'issue', 'list', '--repo', p.repo, '--state', 'all', '--limit', '300', '--json', 'number,title,state,labels,body,url']))
-      const openPrs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '50', '--json', 'number,title,labels,url,headRefName']))
+      const openPrs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '50', '--json', 'number,title,labels,url,headRefName,mergeStateStatus,statusCheckRollup']))
+      if (openPrs) openPrsByRepo.set(p.repo, openPrs)
       const mergedPrs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'merged', '--limit', '20', '--json', 'number,title,mergedAt,url']))
       if (!issues || !openPrs || !mergedPrs) throw new Error('gh could not read ' + p.repo + '. The board shows the last good data.')
       const roadmap = await readMain($, p.path, 'ROADMAP.md')
@@ -350,7 +397,7 @@ async function runFacts($, repo, run) {
   return facts
 }
 
-async function gatherCi($, cached) {
+async function gatherCi($, cached, now) {
   const repoSlots = parseRepoSlots(await readText($, kitDir + '/runner/repos'))
   const vm = repoSlots.length ? ((await sh($, ['limactl', 'list', 'gcauc-ci', '--format', '{{.Status}}'])) || '').trim() || 'not created' : ''
   const out = []
@@ -365,7 +412,7 @@ async function gatherCi($, cached) {
         liveJobs.push(...(parseRunJobs(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=50`]), r) || []))
       }
       const runners = parseRunners(await sh($, ['gh', 'api', `repos/${p.repo}/actions/runners?per_page=100`])) || []
-      const prs = asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '30', '--json', 'number,title,url,headRefName,mergeStateStatus,statusCheckRollup'])) || []
+      const prs = openPrsByRepo.get(p.repo) || asArray(await sh($, ['gh', 'pr', 'list', '--repo', p.repo, '--state', 'open', '--limit', '50', '--json', 'number,title,labels,url,headRefName,mergeStateStatus,statusCheckRollup'])) || []
       // GitHub's single merge state hides BEHIND under BLOCKED, so ask git whether the head contains main.
       const behind = {}
       for (const pr of prs.slice(0, 30)) {
@@ -396,13 +443,13 @@ async function gatherCi($, cached) {
       for (const k of await $.store.keys()) if (k.startsWith('ci-run\u0000' + p.repo + '\u0000') && !keep.has(k)) await $.store.delete(k)
       const budgets = budgetsFromDone(await readMain($, p.path, 'scripts/done'))
       const slotCount = (repoSlots.find((x) => x.repo === p.repo) || {}).slots ?? null
-      out.push({ name: p.name, repo: p.repo, key, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now: Date.now(), behind }) })
+      out.push({ name: p.name, repo: p.repo, key, ci: summarizeCi({ runs, jobs: liveJobs, runners, slots: slotCount, prs, facts, budgets, now, behind }) })
     } catch (err) {
       const before = [...ci.projects, ...((cached && cached.projects) || [])].find((x) => x.repo === p.repo && x.ci)
       out.push({ name: p.name, repo: p.repo, key, ci: before ? before.ci : null, stale: true, error: String((err && err.message) || err) })
     }
   }
-  return { at: Date.now(), vm, projects: out, billing: await billing($, cached) }
+  return { at: now, vm, projects: out, billing: await billing($, cached) }
 }
 
 // Actions minutes this month, when the gh token has the user scope; checked every 10 minutes.
@@ -564,6 +611,7 @@ function boardView($, E, width, surface) {
     children: [
       Text({ dimColor: true, children: [busy ? 'refreshing…' : 'updated ' + age] }),
       Button({ key: 'refresh', label: 'Refresh', hotkey: 'r', plain: true, dimColor: true, onPress: () => { refresh($, true) } }),
+      ...(pausedUntil > Date.now() ? [colored(E, surface, 'warn', `GitHub rate limit: paused for ${Math.ceil((pausedUntil - Date.now()) / 60_000)} more min`)] : []),
       ...(lastError ? [colored(E, surface, 'bad', lastError.slice(0, 80))] : []),
     ],
   })
