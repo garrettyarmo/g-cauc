@@ -8,6 +8,7 @@ The full rules and the check tool are in `vendor/simplified-technical-english/`.
 
 Use STE for:
 
+- Every message to Garrett in a chat session, in each project. This includes a status report, a question, and a list of tasks for him.
 - Specs, spec PR bodies, and replies on spec PRs
 - Build PR bodies, `AK_PR.md`, and `AK_FIX.md`
 - Review verdicts from the CTO review and the agent review
@@ -38,9 +39,20 @@ Use common words. The word list in `vendor/simplified-technical-english/referenc
 
 If an STE sentence changes the meaning, keep the correct meaning. Correct text is more important than STE text.
 
+## When you ask Garrett to do a task
+
+Garrett does not do a task that he does not understand. Before you ask him to run a command, to change a setting, or to make a decision, give him these 4 items:
+
+1. **What it is:** the thing, in words that do not need the code.
+2. **Why it matters:** what goes wrong if he does not do it.
+3. **What it changes:** what the step changes, and what it does not change. For a command, say what it reads, what it shows, and if it changes anything.
+4. **What to send back:** the output or the answer that you need from him.
+
+Example: "This command reads the secret on your Mac and shows only the lines that start with `INFERENCE_`. It does not show the passwords and it changes nothing. Send me the lines that it shows."
+
 ## The check
 
-Write the text to a file before you post it. Then run:
+Write the text to a file before you post it. Do this also for a chat reply that asks Garrett to do a task or that is longer than 10 lines. Then run:
 
 ```bash
 python3 ~/code/g-cauc/vendor/simplified-technical-english/scripts/ste_check.py --no-vocab --mode descriptive <file>
