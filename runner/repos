@@ -2,8 +2,11 @@
 #   owner/repo  slots  CPUs  memory GiB
 # Slots are jobs at once. CPUs are shared with the Mac and the other VMs (a quiet VM uses almost
 # none); memory is the VM's own, so the total must leave the Mac room (64 GiB, 2026-10-05).
+# The Mac has 6 performance and 12 efficiency cores. When all VMs are busy, each gets a share in
+# proportion to its CPUs, so CallFlow (the longest suite) gets the most; myqap's 2 CPUs per slot
+# match GitHub's runners (2026-10-05: CallFlow end-to-end hit its 30-minute limit at 8+8+12).
 # Add a line when a project adopts g-cauc (the adopt skill), then run `gcauc-runner up` and
 # restart the agent with no job running (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
 garrettyarmo/callflow 2 12 12
-garrettyarmo/bisonbrain 2 8 8
-garrettyarmo/myqap 2 8 8
+garrettyarmo/bisonbrain 2 6 8
+garrettyarmo/myqap 2 4 8
