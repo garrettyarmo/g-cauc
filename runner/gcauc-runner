@@ -147,13 +147,11 @@ prune_stale() {
 slot() {
   local repo="$1" n="$2" gid="$3" cpuset="$4" vm="$5"
   local short="${repo##*/}"
-  local events="$logdir/$short-$n.events" work name jit status ts epid
+  # Per repo and slot, so a slot's sweep removes only what that slot started, and scripts/dev gives
+  # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
+  local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
   while true; do
-    ts="$(date +%s)"
-    name="$host-$short-$n-$ts"
-    # Per job, so scripts/dev's path-derived compose project (with its database volume) is new for
-    # each job, and a slot's sweep removes only what that job started.
-    work="_work-$short-$n-$ts"
+    name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
       -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
       -f "labels[]=self-hosted" -f "labels[]=Linux" -f "labels[]=$arch" -f "labels[]=$label" \
