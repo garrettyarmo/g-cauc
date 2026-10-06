@@ -105,13 +105,27 @@ cmd_rebuild() {
   done
 }
 
-# Remove what a slot's job left in its VM's Docker: compose projects under its work folder.
+# Remove what a slot's job left in its VM's Docker: the containers and volumes of the compose
+# projects under its work folder (the events record names a project that the job already stopped),
+# the anonymous volumes that no container uses (each GitHub service container leaves one), and the
+# named volumes that no container uses and that are older than GitHub's 6-hour job limit. A running
+# job of another slot can stop its project and start it again, so the sweep never removes a newer
+# volume by age alone.
 sweep() {
-  local vm="$1" dir="$2"
+  local vm="$1" dir="$2" events="$3" p
   in_vm "$vm" sh -c "docker ps -aq --filter label=com.docker.compose.project.working_dir \
     | xargs -r docker inspect --format '{{.Id}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}' \
     | awk -v d='$dir' 'index(\$2, d) == 1 { print \$1 }' | xargs -r docker rm -fv" </dev/null >/dev/null 2>&1 || true
+  for p in $(awk -v d="$dir" 'index($2, d) == 1 && $3 ~ /^[a-z0-9_-]+$/ { print $3 }' "$events" 2>/dev/null | sort -u); do
+    in_vm "$vm" sh -c "docker volume ls -q --filter label=com.docker.compose.project=$p | xargs -r docker volume rm" \
+      </dev/null >/dev/null 2>&1 || true
+  done
   in_vm "$vm" docker network prune -f --filter until=10m </dev/null >/dev/null 2>&1 || true
+  in_vm "$vm" docker volume prune -f </dev/null >/dev/null 2>&1 || true
+  in_vm "$vm" sh -c 'old=$(($(date +%s) - 6 * 3600)); docker volume ls -q --filter dangling=true \
+    | xargs -r docker volume inspect --format "{{.Name}} {{.CreatedAt}}" \
+    | while read -r v t; do [ "$(date -d "$t" +%s)" -lt "$old" ] && echo "$v"; done | xargs -r docker volume rm' \
+    </dev/null >/dev/null 2>&1 || true
 }
 
 # Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
@@ -133,8 +147,9 @@ prune_stale() {
 slot() {
   local repo="$1" n="$2" gid="$3" cpuset="$4" vm="$5"
   local short="${repo##*/}"
-  # Per repo and slot, so a slot's sweep removes only what that slot started.
-  local work="_work-$short-$n" name jit status
+  # Per repo and slot, so a slot's sweep removes only what that slot started, and scripts/dev gives
+  # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
+  local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
   while true; do
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
@@ -153,13 +168,22 @@ slot() {
     fi
     log "$repo slot $n: $name is waiting for a job in $vm"
     status=0
+    # Record each container that the job creates, with its compose folder and project, for sweep.
+    # The tag in the format names this slot's events process in the VM.
+    in_vm "$vm" docker events --filter type=container --filter event=create --format \
+      "events-$short-$n {{index .Actor.Attributes \"com.docker.compose.project.working_dir\"}} {{index .Actor.Attributes \"com.docker.compose.project\"}}" \
+      </dev/null >"$events" 2>/dev/null &
+    epid=$!
     # The config goes in on stdin, so it never appears in this Mac's process list.
     printf '%s\n' "$jit" | in_vm "$vm" docker run --rm -i --name "gcauc-$short-$n" --network host \
       --cpuset-cpus "$cpuset" \
       --group-add "$gid" -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint bash "$image" -c 'read -r JIT; exec ./run.sh --jitconfig "$JIT"' \
       >>"$logdir/$short-$n.log" 2>&1 || status=$?
-    sweep "$vm" "/home/runner/$work/"
+    in_vm "$vm" pkill -f "[e]vents-$short-$n " </dev/null >/dev/null 2>&1 || true
+    kill "$epid" 2>/dev/null || true
+    wait "$epid" 2>/dev/null || true
+    sweep "$vm" "/home/runner/$work/" "$events"
     log "$repo slot $n: $name finished (exit $status)"
     [ "$status" -eq 0 ] || sleep 10
   done
@@ -170,7 +194,8 @@ clear_vms() {
   local l
   for l in ${lines[@]+"${lines[@]}"}; do
     parse "$l"
-    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' </dev/null >/dev/null 2>&1 || true
+    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f; pkill -f "[d]ocker events --filter"' \
+      </dev/null >/dev/null 2>&1 || true
   done
 }
 
@@ -188,7 +213,10 @@ cmd_serve() {
     per=$((ncpu / slots))
     [ "$per" -ge 1 ] || per=1
     windows=$((ncpu / per))
-    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f' </dev/null >/dev/null 2>&1 || true
+    in_vm "$vm" sh -c 'docker ps -aq --filter name=^gcauc- | xargs -r docker rm -f; pkill -f "[d]ocker events --filter"' \
+      </dev/null >/dev/null 2>&1 || true
+    # No job runs now, so every volume that no container uses is a leftover.
+    in_vm "$vm" docker volume prune -af </dev/null >/dev/null 2>&1 || true
     prune_stale "$repo"
     for n in $(seq 1 "$slots"); do
       slot "$repo" "$n" "$gid" "$((((n - 1) % windows) * per))-$((((n - 1) % windows) * per + per - 1))" "$vm" </dev/null &
