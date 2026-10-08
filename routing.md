@@ -1,6 +1,6 @@
 # Routing: which model for which job
 
-The rule of thumb: volume goes to the light lanes (Composer 2.5 and Grok 4.7 through Cursor), judgment and risk go to Opus 5.5, and the scarce Codex allowance is saved for the reviews where a different family matters most. Every job has a fallback order; when a lane is out (see `lanes.md`), take the next one in its row and keep going for as long as the lane stays out. Nothing waits for a lane to come back.
+The rule of thumb: volume goes to the light lanes (Composer 2.5 and Grok 4.7 through Cursor), judgment and risk go to Opus 5.5, and the scarce Codex allowance is saved for the reviews where a different family matters most. Claude's routine work runs on Sonnet 5.5. Every job has a fallback order; when a lane is out (see `lanes.md`), take the next one in its row and keep going for as long as the lane stays out. Nothing waits for a lane to come back.
 
 ## The map
 
@@ -8,16 +8,16 @@ The rule of thumb: volume goes to the light lanes (Composer 2.5 and Grok 4.7 thr
 |---|---|---|---|
 | Plan with Garrett (`spec`, kickoff) | `claude` Opus 5.5 | | |
 | Product pass (`propose`) | `claude` Opus 5.5 | `grok` Grok 4.7 high | |
-| CTO review of a spec (`cto-review`) | `codex` GPT-6.1 Sol | `grok` Grok 4.7 high | `claude` Opus subagent, marked same family |
+| CTO review of a spec (`cto-review`) | `codex` GPT-6.1 Sol | `grok` Grok 4.7 high | `claude` Opus 5.5 subagent (model `opus`), marked same family |
 | Foreman pass | `claude` Sonnet 5.5, as a Desktop task | | |
-| Build, size S, normal risk | `composer` Composer 2.5 | `grok` Grok 4.7 medium | `claude` Opus 5.5 |
-| Build, size M, normal risk | `grok` Grok 4.7 high | `composer` Composer 2.5 | `claude` Opus 5.5 |
+| Build, size S, normal risk | `composer` Composer 2.5 | `grok` Grok 4.7 medium | `claude` Sonnet 5.5 |
+| Build, size M, normal risk | `grok` Grok 4.7 high | `composer` Composer 2.5 | `claude` Sonnet 5.5 |
 | Build, `risk:high`, or ambiguous or cross-cutting | `claude` Opus 5.5 | `codex` GPT-6.1 Sol | `grok` Grok 4.7 xhigh |
 | Fix round (CI red, review findings, rebase) | the lane that built it | one step stronger when stalled: `grok` Grok 4.7 high | then `claude` Opus 5.5 |
 | Review, normal risk | `grok` Grok 4.7 medium | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash |
 | Review, `risk:high` | `codex` GPT-6.1 Sol | `claude` Opus 5.5 | `grok` Grok 4.7 high |
 | Chores (dependency bumps, lint, flaky tests, docs) | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash | |
-| Research subagents | `claude` Sonnet 5.5 or Opus 5.5 | `grok` Grok 4.7 high | |
+| Research, digests, log reading (subagents) | `claude` Sonnet 5.5 or Haiku 5.5 | `grok` Grok 4.7 high | |
 
 When the `lane:` label on an issue names a lane that is out, route by this map instead.
 
@@ -30,4 +30,5 @@ The reviewer's family is never one that has a commit on the branch. Families: An
 - Day 1 on CallFlow (2026-10-01 to 02): the Codex allowance ran out in about a day with Codex building and reviewing at full speed, and the Cursor lane was never used because the kit shipped it switched off. Garrett wants Grok 4.7 and Composer 2.5 carrying most of the load because they draw lightest on the plans.
 - The reviews that caught the worst defects that day (a tenant isolation bypass through foreign keys, a schema filter wildcard) were strong models reviewing a different family's work. That is why `risk:high` reviews start with GPT-6.1 Sol and Opus.
 - Fix rounds keep going while they make progress (Garrett, 2026-10-02: a PR that is nearly fixed must not park while he sleeps). A stall moves the fix to a stronger model instead of stopping; only a stall on Opus 5.5, or 12 rounds on one PR, parks it.
+- In the week to 2026-10-07, Claude builds ran as Opus subagents inside the CTO sessions. They were about two thirds of the Claude use in Bison Brain and myqap. About 95% of that cost is input: each call reads the whole context again, and a cache read costs the same on Opus 5.5 and Sonnet 5.5. So a Claude build runs as its own job (see `lanes.md`), on Sonnet 5.5 unless its row names Opus 5.5. Sonnet 5.5 also has a model limit of its own, beside the Opus limit.
 - Change this file when the evidence changes: a lane that keeps getting blocked in review moves down its build rows; a lane that keeps passing moves up.

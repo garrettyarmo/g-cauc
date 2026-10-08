@@ -8,7 +8,7 @@ A lane is one CLI and model that can run work. There is no global limit on jobs:
 |---|---|---|---|---|---|
 | `composer` | Cursor | Cursor Ultra | light | 6 | on |
 | `grok` | xAI | Cursor Ultra | light | 6 | on |
-| `claude` | Anthropic | Claude Max 20x | medium | 4 | on |
+| `claude` | Anthropic | Claude Max 20x | medium | 4 | on; Sonnet 5.5 for routine jobs, Opus 5.5 only where `routing.md` names it |
 | `codex` | OpenAI | ChatGPT Pro ($100) | heavy | 3 | on; its weekly allowance lasted about one day of full use on 2026-10-01 |
 | `gemini` | Google | Cursor Ultra | light | 2 | on, for chores and as a spare reviewing family |
 | `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: Garrett has only the small X subscription; Grok runs through Cursor instead |
@@ -20,11 +20,13 @@ Weight is how hard a job in that lane draws on its subscription. Light lanes are
 
 Every prompt starts with the foreman's marker `[ak:<project>#<issue>:<role>:<round>]`. Every log goes to `~/code/<project>_wt/logs/<issue>-<role>-<round>-<lane>.jsonl` as structured events: that is what lets `/board` show each job's thinking, commands and verdict. Claude jobs need no log file; `/board` reads their transcripts.
 
-**Claude** (can push and open PRs itself):
+**Claude** (can push and open PRs itself). `<model>` is `sonnet` (Sonnet 5.5), or `opus` (Opus 5.5) when the row in `routing.md` names Opus 5.5:
 
 ```bash
-cd <worktree> && claude --bg --name "ak-<P>-<N>-<role>" --permission-mode auto --model opus "<prompt>"
+cd <worktree> && claude --bg --name "ak-<P>-<N>-<role>" --permission-mode auto --model <model> "<prompt>"
 ```
+
+A Claude build, fix or PR review always runs with this command, never as an Agent subagent of a CTO session. The product pass has the one exception: its spec review fallback is a subagent with model `opus`. That pass is short and starts with a fresh context. A subagent with no model of its own runs on the session's model, and its report goes into the session's large context. When a session starts a subagent for research, a digest or log reading, it always sets the model: `haiku` or `sonnet`, and `opus` only for judgment that needs it. The `haiku` alias selects Haiku 4.5 until Claude Code moves it. For Haiku 5.5 in a headless job, use `--model claude-haiku-5-5`.
 
 **Codex** (if its sandbox refuses `git push`, it commits and leaves `AK_PR.md`):
 
