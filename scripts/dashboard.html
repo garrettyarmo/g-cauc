@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>g-cauc progress</title>
+<style>
+/* Tokens. Status colors and project colors come from BRAND.md; the rest is neutral. */
+:root {
+  --bg: oklch(0.985 0.002 270);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.962 0.004 270);
+  --fg: oklch(0.24 0.01 270);
+  --fg-2: oklch(0.42 0.01 270);
+  --fg-3: oklch(0.52 0.01 270);
+  --border: oklch(0.91 0.004 270);
+  --accent: #5B5BD6;
+  --good: #22A06B; --warn: #E0A21A; --bad: #E5484D; --muted: #8A8F98;
+  --track: rgba(127, 127, 127, 0.24);
+  --radius: 8px; --radius-sm: 4px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s6: 24px; --s8: 32px; --s12: 48px;
+  --t-label: 12px; --t-body: 13px; --t-h2: 16px; --t-h1: 22px;
+  --mix: 100%;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(0.16 0.006 270);
+    --surface: oklch(0.205 0.007 270);
+    --surface-2: oklch(0.25 0.008 270);
+    --fg: oklch(0.94 0.004 270);
+    --fg-2: oklch(0.8 0.006 270);
+    --fg-3: oklch(0.7 0.008 270);
+    --border: oklch(0.3 0.008 270);
+    --accent: #8C8CF0;
+    --mix: 72%;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 400 var(--t-body)/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: inherit; text-decoration: none; }
+a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+.wrap { max-width: 1440px; margin: 0 auto; padding: var(--s6) var(--s4) var(--s12); }
+header.top { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s6); }
+h1 { font-size: var(--t-h1); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+h2 { font-size: var(--t-h2); font-weight: 600; margin: 0 0 var(--s1); }
+.sub, .note { color: var(--fg-3); margin: 0; }
+section { margin-top: var(--s8); }
+.note { margin-bottom: var(--s3); }
+.num { font-variant-numeric: tabular-nums; }
+
+.badge { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; background: var(--p); color: var(--pink); flex: none; }
+.chip { display: inline-flex; align-items: center; gap: var(--s1); padding: 0 var(--s2); height: 20px; border-radius: 999px; background: var(--surface-2); color: var(--fg-2); font-size: var(--t-label); white-space: nowrap; }
+.chip::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tone, var(--muted)); }
+.chip.good { --tone: var(--good); } .chip.warn { --tone: var(--warn); } .chip.bad { --tone: var(--bad); }
+
+/* Board: one lane per project, five columns. */
+.lane { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--s4); margin-top: var(--s3); }
+.lane-head { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s3); }
+.lane-head .name { font-weight: 600; }
+.lane-head .counts { color: var(--fg-3); }
+.lane-head .gh { margin-left: auto; color: var(--fg-3); }
+.lane-head .gh:hover { color: var(--fg); }
+.cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--s3); }
+.col h3 { font-size: var(--t-label); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-3); margin: 0 0 var(--s2); }
+.cards { display: grid; gap: var(--s2); }
+.card { display: block; padding: var(--s2) var(--s3); border-radius: var(--radius-sm); background: var(--surface-2); }
+.card:hover { background: color-mix(in oklch, var(--surface-2) 80%, var(--fg) 6%); }
+.card .top { display: flex; justify-content: space-between; gap: var(--s2); color: var(--fg-3); font-size: var(--t-label); }
+.card .id { font-weight: 600; color: var(--fg-2); }
+.card .title { margin: 2px 0 var(--s1); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card .chips { display: flex; flex-wrap: wrap; gap: var(--s1); }
+.empty, .more { color: var(--fg-3); font-size: var(--t-label); padding: var(--s1) 0; }
+.more:hover { color: var(--fg); }
+.error { display: flex; gap: var(--s2); align-items: center; color: var(--fg-2); }
+
+/* Speed: one small chart per project, one shared scale. */
+.speed { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--s2) var(--s4); }
+.srow { display: grid; grid-template-columns: 180px minmax(160px, 1fr) 96px 96px 120px; gap: var(--s4); align-items: center; padding: var(--s2) 0; }
+.srow + .srow { border-top: 1px solid var(--border); }
+.srow.head { color: var(--fg-3); font-size: var(--t-label); padding-bottom: 0; }
+.srow .who { display: flex; align-items: center; gap: var(--s2); font-weight: 600; min-width: 0; }
+.srow .val { text-align: right; }
+.srow .big { font-size: var(--t-h2); font-weight: 600; }
+svg.bars { width: 100%; height: 64px; display: block; }
+.axis { display: flex; justify-content: space-between; color: var(--fg-3); font-size: var(--t-label); margin-top: 2px; }
+svg.bars .bar { fill: color-mix(in oklch, var(--p) var(--mix), white); }
+svg.bars .base { stroke: var(--track); }
+svg.bars .hit { fill: transparent; }
+svg.bars .hit:hover + .bar, svg.bars .hit:focus + .bar { opacity: 0.75; }
+
+/* Latest. */
+ol.latest { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+ol.latest li { display: grid; grid-template-columns: 56px 22px minmax(0, 1fr); gap: var(--s3); align-items: center; padding: var(--s2) var(--s4); }
+ol.latest li + li { border-top: 1px solid var(--border); }
+ol.latest .when { color: var(--fg-3); }
+ol.latest a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.latest a:hover { text-decoration: underline; }
+ol.latest .verb { color: var(--fg-3); }
+
+#tip { position: fixed; pointer-events: none; padding: var(--s1) var(--s2); border-radius: var(--radius-sm); background: var(--fg); color: var(--bg); font-size: var(--t-label); z-index: 10; }
+
+@media (max-width: 1100px) { .cols { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .srow { grid-template-columns: minmax(0, 1fr) 72px 72px; }
+  .srow .chart { grid-column: 1 / -1; grid-row: 2; }
+  .srow .med, .srow.head .med { display: none; }
+  ol.latest li { grid-template-columns: 48px 22px minmax(0, 1fr); padding: var(--s2) var(--s3); }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Progress</h1>
+    <p class="sub" id="updated"></p>
+  </header>
+  <main>
+    <section aria-labelledby="h-board">
+      <h2 id="h-board">Board</h2>
+      <p class="note">Each card opens on GitHub. Cards come from issue labels, open PRs, worker jobs on this Mac, and slice worktrees with no PR yet.</p>
+      <div id="board"></div>
+    </section>
+    <section aria-labelledby="h-speed">
+      <h2 id="h-speed">Speed</h2>
+      <p class="note">Merged PRs each day for the last 14 days. All rows use the same scale. Today is still in progress.</p>
+      <div id="speed"></div>
+    </section>
+    <section aria-labelledby="h-latest">
+      <h2 id="h-latest">Latest</h2>
+      <p class="note">Merges in the last 48 hours and PRs opened in the last 24 hours.</p>
+      <ol class="latest" id="latest"></ol>
+    </section>
+  </main>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<script>
+const DATA = /*DATA*/null
+
+const COLS = [
+  ['ready', 'Ready', '/issues?q=is%3Aopen+label%3Aready'],
+  ['building', 'Building', '/issues?q=is%3Aopen+label%3Abuilding'],
+  ['review', 'In review', '/pulls'],
+  ['needs', 'Needs you', '/issues?q=is%3Aopen+label%3Aneeds%3Agarrett'],
+  ['merged', 'Merged, last 24 h', '/pulls?q=is%3Apr+is%3Amerged'],
+]
+const SHOW = 6
+
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag)
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue
+    if (k === 'style') for (const [p, x] of Object.entries(v)) n.style.setProperty(p, x)
+    else n.setAttribute(k, v)
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k.nodeType ? k : String(k))
+  return n
+}
+function svgEl(tag, attrs) {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', tag)
+  for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v)
+  return n
+}
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000)
+  if (s < 3600) return Math.round(s / 60) + 'm'
+  if (s < 86400) return Math.round(s / 3600) + 'h'
+  return Math.round(s / 86400) + 'd'
+}
+const projVars = (p) => ({ '--p': p.color, '--pink': p.ink })
+const badge = (p) => el('span', { class: 'badge', style: projVars(p), 'aria-hidden': 'true' }, p.mono)
+const chip = (c) => el('span', { class: 'chip ' + c.tone }, c.text)
+
+function card(c) {
+  return el('a', { class: 'card', href: c.url || null, target: c.url ? '_blank' : null, rel: 'noopener' },
+    el('div', { class: 'top' }, el('span', { class: 'id num' }, c.id), c.since ? el('span', { class: 'num', title: new Date(c.since).toLocaleString() }, ago(c.since)) : null),
+    el('div', { class: 'title' }, c.title),
+    c.chips.length ? el('div', { class: 'chips' }, c.chips.map(chip)) : null)
+}
+
+function lane(p) {
+  const head = el('div', { class: 'lane-head' }, badge(p), el('span', { class: 'name' }, p.name),
+    el('a', { class: 'gh', href: p.url, target: '_blank', rel: 'noopener' }, p.repo))
+  if (p.error) {
+    return el('div', { class: 'lane' }, head, el('div', { class: 'error' }, chip({ text: 'Could not read GitHub', tone: 'bad' }), p.error))
+  }
+  head.insertBefore(el('span', { class: 'counts num' },
+    `${p.building.length} building · ${p.review.length} in review · ${p.merged.length} merged today`), head.querySelector('.gh'))
+  const cols = el('div', { class: 'cols' }, COLS.map(([key, title, q]) => {
+    const list = p[key]
+    return el('div', { class: 'col' },
+      el('h3', {}, `${title} `, el('span', { class: 'num' }, list.length)),
+      el('div', { class: 'cards' },
+        list.length ? list.slice(0, SHOW).map(card) : el('div', { class: 'empty' }, 'None'),
+        list.length > SHOW ? el('a', { class: 'more', href: p.url + q, target: '_blank', rel: 'noopener' }, `${list.length - SHOW} more on GitHub`) : null))
+  }))
+  return el('div', { class: 'lane' }, head, cols)
+}
+
+function bars(p, max) {
+  const w = 12, h = 64, top = 4
+  const s = svgEl('svg', { class: 'bars', viewBox: `0 0 ${p.daily.length * w} ${h}`, preserveAspectRatio: 'none', role: 'img',
+    'aria-label': `${p.name}: ${p.daily.map((d) => d.n).join(', ')} merged PRs a day, oldest first` })
+  s.append(svgEl('line', { class: 'base', x1: 0, x2: p.daily.length * w, y1: h - 0.5, y2: h - 0.5, 'vector-effect': 'non-scaling-stroke' }))
+  p.daily.forEach((d, i) => {
+    const day = new Date(d.day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+    const tip = `${p.name}, ${day}: ${d.n} merged${i === p.daily.length - 1 ? ' so far' : ''}`
+    s.append(svgEl('rect', { class: 'hit', x: i * w, y: 0, width: w, height: h, tabindex: 0, 'data-tip': tip }))
+    if (d.n) {
+      const bh = Math.max(2, ((h - top) * d.n) / max)
+      s.append(svgEl('rect', { class: 'bar', x: i * w + 2, y: h - bh, width: w - 4, height: bh, rx: 1.5 }))
+    }
+  })
+  return s
+}
+
+function speed(projects) {
+  const ok = projects.filter((p) => !p.error)
+  const max = Math.max(1, ...ok.flatMap((p) => p.daily.map((d) => d.n)))
+  const first = ok.length ? new Date(ok[0].daily[0].day).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+  const fmtMed = (h) => h == null ? 'none' : h < 1 ? Math.round(h * 60) + ' min' : h < 48 ? h.toFixed(1) + ' h' : (h / 24).toFixed(1) + ' d'
+  const rows = [el('div', { class: 'srow head' }, el('span', {}, 'Project'), el('span', { class: 'chart' }, `Last 14 days (top of scale: ${max} a day)`),
+    el('span', { class: 'val' }, 'Last 7 days'), el('span', { class: 'val' }, '7 days before'), el('span', { class: 'val med' }, 'Median to merge'))]
+  for (const p of ok) {
+    rows.push(el('div', { class: 'srow', style: projVars(p) },
+      el('span', { class: 'who' }, badge(p), el('span', {}, p.name)),
+      el('span', { class: 'chart' }, bars(p, max), el('span', { class: 'axis' }, el('span', {}, first), el('span', {}, 'today'))),
+      el('span', { class: 'val big num' }, p.week),
+      el('span', { class: 'val big num' }, p.lastWeek),
+      el('span', { class: 'val med num' }, fmtMed(p.median))))
+  }
+  if (!ok.length) rows.push(el('div', { class: 'empty' }, 'No project data.'))
+  return el('div', { class: 'speed' }, rows)
+}
+
+function latest(projects) {
+  const items = projects.filter((p) => !p.error).flatMap((p) => p.events.map((e) => ({ ...e, p })))
+    .sort((a, b) => Date.parse(b.when) - Date.parse(a.when)).slice(0, 20)
+  if (!items.length) return [el('li', { class: 'empty' }, 'Nothing in the last 48 hours.')]
+  return items.map((e) => el('li', {},
+    el('span', { class: 'when num', title: new Date(e.when).toLocaleString() }, new Date(e.when).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })),
+    badge(e.p),
+    el('a', { href: e.url, target: '_blank', rel: 'noopener' }, el('span', { class: 'verb' }, `${e.verb} ${e.id} `), e.title)))
+}
+
+function render() {
+  const up = document.getElementById('updated')
+  if (!DATA) {
+    up.textContent = 'No data yet. Run: node ~/code/g-cauc/scripts/dashboard.mjs'
+    return
+  }
+  const age = (Date.now() - Date.parse(DATA.generated)) / 60000
+  up.replaceChildren(`${DATA.projects.length} projects · updated ${ago(DATA.generated)} ago`,
+    age > 15 ? el('span', {}, ' ', chip({ text: 'Old data: the update job may be off', tone: 'warn' })) : '')
+  document.getElementById('board').replaceChildren(...(DATA.projects.length ? DATA.projects.map(lane) : [el('p', { class: 'empty' }, 'No projects in projects.md.')]))
+  document.getElementById('speed').replaceChildren(speed(DATA.projects))
+  document.getElementById('latest').replaceChildren(...latest(DATA.projects))
+}
+
+const tip = document.getElementById('tip')
+function showTip(e) {
+  const t = e.target.closest && e.target.closest('[data-tip]')
+  if (!t) { tip.hidden = true; return }
+  tip.textContent = t.getAttribute('data-tip')
+  const r = t.getBoundingClientRect()
+  tip.hidden = false
+  tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2)) + 'px'
+  tip.style.top = Math.max(8, r.top - tip.offsetHeight - 6) + 'px'
+}
+document.addEventListener('pointerover', showTip)
+document.addEventListener('focusin', showTip)
+document.addEventListener('pointerout', (e) => { if (e.target.closest && e.target.closest('[data-tip]')) tip.hidden = true })
+render()
+</script>
+</body>
+</html>
