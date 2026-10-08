@@ -1,6 +1,6 @@
 ---
 name: foreman
-description: One g-cauc foreman pass over every unattended project, run by a scheduled task every 15 minutes. Carries failures back to builders, starts cross-family reviews, starts ready build issues in every free lane, cleans up, then exits. Never waits on workers and never writes code itself.
+description: One g-cauc foreman pass over every unattended project, run by a scheduled task every 15 minutes, or over one attended project, run by its CTO session in a Sonnet subagent. Carries failures back to builders, starts cross-family reviews, starts ready build issues in every free lane, cleans up, then exits. Never waits on workers and never writes code itself.
 ---
 
 # Foreman pass
@@ -15,7 +15,7 @@ You run one pass and exit. You keep nothing between passes: GitHub, git and the 
   - Then add the line `test <project>#<issue>` under the reset time in the file. The write also starts the next hour.
   - At a later pass, find the job named on that line. If its log ends on a usage limit, step 3 writes the new reset time.
   - If that job ended, or ran for 5 minutes, and its log has no usage-limit message, delete the file. The lane is back.
-- Work only in projects whose AGENTS.md says `Autonomy: unattended`.
+- Work only in projects whose AGENTS.md says `Autonomy: unattended`. An attended project's CTO session can run you for its own project. Then do the pass for that project only.
 - Touch only build issues and their PRs. Ideas and spec PRs belong to the product pass.
 
 ## Names that tie it together
@@ -25,7 +25,7 @@ For project P (its folder name) and issue N:
 - Worktree: `~/code/<P>_wt/ak-<N>`. Branch: `build/<N>-<slug>`.
 - Logs: `~/code/<P>_wt/logs/<N>-<role>-<round>-<lane>.jsonl`, written as structured events by the commands in `lanes.md`.
 - Every worker prompt starts with the marker `[ak:<P>#<N>:<role>:<round>]`, where role is `build`, `fix` or `review`. Claude jobs are named `ak-<P>-<N>-<role>`.
-- Live jobs: `claude agents --json` (by name), and `pgrep -fl "ak:<P>#<N>"` for Codex and Cursor jobs (the command line shows the CLI and `--model`, which tells you the lane).
+- Live jobs: `claude agents --json` (by name), and `pgrep -fl "[a]k:<P>#<N>"` for Codex and Cursor jobs. The command line shows the CLI and `--model`, which tells you the lane. The brackets stop the pattern from matching another shell whose command line holds it, such as a second wait loop.
 - Round counts live in GitHub as comments: `<!-- ak:round gate=<ci|review|rebase|staging|restart> n=<k> lane=<lane> -->`. Count them; post one each time you send work back. With `ak:start`, they give the branch's families for the cross-family rule in `routing.md`.
 - Codex and Cursor jobs may not reach GitHub. Before launching one, save what it would read there into the log folder and pass paths, not URLs: the issue body as `<N>-issue.md`, the blocking review as `<N>-review-<round>.md`, the failed CI log as `<N>-ci-<round>.log`.
 
