@@ -17,6 +17,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseProjects, monogram, parseJobs, parseClaudeAgents, laneOf, modelName } from '../hooks/lib.js'
 import { projectColor, ink } from '../hooks/draw.js'
+import { latestChecks } from '../hooks/ci.js'
 
 const kit = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const home = os.homedir()
@@ -66,20 +67,22 @@ function ticketOf(pr) {
   return 'PR ' + pr.number
 }
 
+// The newest run of each check (latestChecks), so a passing rerun replaces an old failure.
+// CI is every check and status except agent-review.
 function checks(pr) {
-  const rollup = pr.statusCheckRollup || []
-  const runs = rollup.filter((c) => c.__typename === 'CheckRun')
-  const review = rollup.find((c) => c.__typename === 'StatusContext' && c.context === 'agent-review')
+  const latest = latestChecks(pr.statusCheckRollup)
+  const review = latest['agent-review']
+  const ci = Object.entries(latest).filter(([name]) => name !== 'agent-review').map(([, state]) => state)
   const chips = []
   if (pr.isDraft) chips.push({ text: 'Draft', tone: 'muted' })
-  if (!runs.length) chips.push({ text: 'No CI', tone: 'muted' })
-  else if (runs.some((c) => ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(c.conclusion))) chips.push({ text: 'CI failed', tone: 'bad' })
-  else if (runs.some((c) => c.status !== 'COMPLETED')) chips.push({ text: 'CI running', tone: 'warn' })
+  if (!ci.length) chips.push({ text: 'No CI', tone: 'muted' })
+  else if (ci.includes('fail')) chips.push({ text: 'CI failed', tone: 'bad' })
+  else if (ci.includes('running')) chips.push({ text: 'CI running', tone: 'warn' })
   else chips.push({ text: 'CI passed', tone: 'good' })
-  if (!review) chips.push({ text: 'Not reviewed', tone: 'muted' })
-  else if (review.state === 'SUCCESS') chips.push({ text: 'Review passed', tone: 'good' })
-  else if (review.state === 'PENDING') chips.push({ text: 'In review', tone: 'warn' })
-  else chips.push({ text: 'Review blocked', tone: 'bad' })
+  if (review === 'pass') chips.push({ text: 'Review passed', tone: 'good' })
+  else if (review === 'running') chips.push({ text: 'In review', tone: 'warn' })
+  else if (review === 'fail') chips.push({ text: 'Review blocked', tone: 'bad' })
+  else chips.push({ text: 'Not reviewed', tone: 'muted' })
   if (pr.mergeStateStatus === 'DIRTY') chips.push({ text: 'Conflict', tone: 'bad' })
   else if (pr.mergeStateStatus === 'BEHIND') chips.push({ text: 'Behind main', tone: 'warn' })
   if (has(pr, 'risk:high')) chips.push({ text: 'risk:high', tone: 'muted' })
@@ -117,7 +120,7 @@ function collect(p, jobs, now) {
   const key = path.basename(p.path)
   const mine = jobs.filter((j) => j.project === key)
   const prs = open.data
-  const prTicket = new Set(prs.map(ticketOf))
+  const prOf = new Map(prs.map((pr) => [ticketOf(pr), pr]))
   const issueCard = (i, chips = []) => ({ id: '#' + i.number, title: i.title, url: i.url, since: i.updatedAt, chips })
   const prCard = (pr) => {
     const t = ticketOf(pr)
@@ -125,20 +128,36 @@ function collect(p, jobs, now) {
     return { id: t, title: pr.title, url: pr.url, since: pr.createdAt, chips: [...checks(pr), ...live] }
   }
 
-  const needs = [...issues.data.filter((i) => has(i, 'needs:garrett')).map((i) => issueCard(i, [{ text: 'Needs you', tone: 'bad' }])),
-    ...prs.filter((pr) => has(pr, 'needs:garrett')).map(prCard)]
-  const ready = issues.data.filter((i) => has(i, 'ready') && !has(i, 'needs:garrett')).sort((a, b) => a.number - b.number).map((i) => issueCard(i))
-  const building = issues.data.filter((i) => has(i, 'building') && !has(i, 'needs:garrett') && !prTicket.has('#' + i.number))
+  // One card per ticket, in the first column that fits: Needs you, In review, Building, Ready.
+  // An issue with an open PR shows as that PR, with the PR's checks.
+  const needsYou = { text: 'Needs you', tone: 'bad' }
+  const parked = new Set(issues.data.filter((i) => has(i, 'needs:garrett')).map((i) => '#' + i.number))
+  for (const pr of prs) if (has(pr, 'needs:garrett')) parked.add(ticketOf(pr))
+  const needs = [...parked].map((t) => {
+    const pr = prOf.get(t)
+    if (pr) {
+      const c = prCard(pr)
+      return { ...c, chips: [needsYou, ...c.chips] }
+    }
+    const i = issues.data.find((x) => '#' + x.number === t)
+    return i ? issueCard(i, [needsYou]) : null
+  }).filter(Boolean)
+  const waiting = (i) => !parked.has('#' + i.number) && !prOf.has('#' + i.number)
+  const ready = issues.data.filter((i) => has(i, 'ready') && waiting(i)).sort((a, b) => a.number - b.number).map((i) => issueCard(i))
+  const building = issues.data.filter((i) => has(i, 'building') && waiting(i))
     .map((i) => issueCard(i, mine.filter((j) => j.issue === i.number).map(jobChip)))
   const usesIssues = issues.data.some((i) => ['ready', 'building', 'in-review'].some((l) => has(i, l)))
   if (!usesIssues) building.push(...sliceWorktrees(p, new Set([...prs, ...merged.data].map((pr) => pr.headRefName)), now))
-  const review = prs.filter((pr) => !has(pr, 'needs:garrett')).map(prCard)
+  const review = prs.filter((pr) => !parked.has(ticketOf(pr))).map(prCard)
 
   const done = merged.data.filter((pr) => pr.mergedAt).map((pr) => ({ ...pr, t: Date.parse(pr.mergedAt) }))
-  const startOfToday = new Date(now).setHours(0, 0, 0, 0)
+  // Calendar days in local time, so a day with a clock change keeps its own midnights.
+  const today = new Date(now)
+  const midnight = (k) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - k).getTime()
   const daily = Array.from({ length: DAYS }, (_, i) => {
-    const start = startOfToday - (DAYS - 1 - i) * DAY
-    return { day: new Date(start).toISOString(), n: done.filter((pr) => pr.t >= start && pr.t < start + DAY).length }
+    const start = midnight(DAYS - 1 - i)
+    const end = midnight(DAYS - 2 - i)
+    return { day: new Date(start).toISOString(), n: done.filter((pr) => pr.t >= start && pr.t < end).length }
   })
   const week = done.filter((pr) => pr.t >= now - 7 * DAY)
   const hours = week.map((pr) => (pr.t - Date.parse(pr.createdAt)) / 3600000).sort((a, b) => a - b)
@@ -170,7 +189,7 @@ function write() {
   const data = { generated: new Date(now).toISOString(), projects: projects().map((p) => collect(p, jobs, now)) }
   fs.mkdirSync(outDir, { recursive: true })
   const html = fs.readFileSync(path.join(kit, 'scripts/dashboard.html'), 'utf8')
-    .replace('/*DATA*/null', JSON.stringify(data).replace(/</g, '\\u003c'))
+    .replace('/*DATA*/null', () => JSON.stringify(data).replace(/</g, '\\u003c'))
   const file = path.join(outDir, 'index.html')
   fs.writeFileSync(file + '.tmp', html)
   fs.renameSync(file + '.tmp', file)
