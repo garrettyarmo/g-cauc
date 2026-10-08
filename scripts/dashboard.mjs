@@ -91,8 +91,8 @@ function checks(pr) {
 
 const jobChip = (j) => ({ text: `${j.cli === 'claude' ? 'Claude' : modelName(j.model) || laneOf(j.cli, j.model)} ${j.role === 'review' || j.role === 'agent-review' ? 'reviewing' : j.role === 'fix' ? 'fixing' : 'building'}`, tone: 'warn' })
 
-// Slices that have a worktree with a commit in the last 48 hours and no PR yet.
-function sliceWorktrees(p, prBranches, now) {
+// Slices that have a worktree with a commit in the last 48 hours and no PR yet, one card each.
+function sliceWorktrees(p, taken, now) {
   const out = run('git', ['-C', p.path, 'worktree', 'list', '--porcelain'])
   if (!out) return []
   const cards = []
@@ -100,9 +100,10 @@ function sliceWorktrees(p, prBranches, now) {
     const wt = (block.match(/^worktree (.+)$/m) || [])[1]
     const branch = (block.match(/^branch refs\/heads\/(.+)$/m) || [])[1]
     const slice = branch && branch.match(/(?:^|\/)s(\d+)[-_](.*)$/i)
-    if (!wt || !slice || prBranches.has(branch)) continue
+    if (!wt || !slice || taken.has('S-' + slice[1])) continue
     const ct = Number(run('git', ['-C', wt, 'log', '-1', '--format=%ct']) || 0) * 1000
     if (!ct || now - ct > 2 * DAY) continue
+    taken.add('S-' + slice[1])
     cards.push({ id: 'S-' + slice[1], title: slice[2].replace(/[-_]+/g, ' '), since: new Date(ct).toISOString(), chips: [{ text: 'Worktree, no PR yet', tone: 'muted' }] })
   }
   return cards
@@ -120,7 +121,12 @@ function collect(p, jobs, now) {
   const key = path.basename(p.path)
   const mine = jobs.filter((j) => j.project === key)
   const prs = open.data
-  const prOf = new Map(prs.map((pr) => [ticketOf(pr), pr]))
+  // A ticket with two open PRs shows its newest one.
+  const prOf = new Map()
+  for (const pr of prs) {
+    const t = ticketOf(pr)
+    if (!prOf.has(t) || Date.parse(pr.createdAt) > Date.parse(prOf.get(t).createdAt)) prOf.set(t, pr)
+  }
   const issueCard = (i, chips = []) => ({ id: '#' + i.number, title: i.title, url: i.url, since: i.updatedAt, chips })
   const prCard = (pr) => {
     const t = ticketOf(pr)
@@ -143,12 +149,12 @@ function collect(p, jobs, now) {
     return i ? issueCard(i, [needsYou]) : null
   }).filter(Boolean)
   const waiting = (i) => !parked.has('#' + i.number) && !prOf.has('#' + i.number)
-  const ready = issues.data.filter((i) => has(i, 'ready') && waiting(i)).sort((a, b) => a.number - b.number).map((i) => issueCard(i))
+  const ready = issues.data.filter((i) => has(i, 'ready') && !has(i, 'building') && waiting(i)).sort((a, b) => a.number - b.number).map((i) => issueCard(i))
   const building = issues.data.filter((i) => has(i, 'building') && waiting(i))
     .map((i) => issueCard(i, mine.filter((j) => j.issue === i.number).map(jobChip)))
   const usesIssues = issues.data.some((i) => ['ready', 'building', 'in-review'].some((l) => has(i, l)))
-  if (!usesIssues) building.push(...sliceWorktrees(p, new Set([...prs, ...merged.data].map((pr) => pr.headRefName)), now))
-  const review = prs.filter((pr) => !parked.has(ticketOf(pr))).map(prCard)
+  if (!usesIssues) building.push(...sliceWorktrees(p, new Set([...prs, ...merged.data].map(ticketOf)), now))
+  const review = [...prOf].filter(([t]) => !parked.has(t)).map(([, pr]) => prCard(pr))
 
   const done = merged.data.filter((pr) => pr.mergedAt).map((pr) => ({ ...pr, t: Date.parse(pr.mergedAt) }))
   // Calendar days in local time, so a day with a clock change keeps its own midnights.
