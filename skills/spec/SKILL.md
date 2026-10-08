@@ -26,7 +26,13 @@ Say which mode you are in before starting.
 
 Kickoff can span several sittings. Keep the foundation as a draft spec PR and update it each time.
 
-While this session drives builds itself during the attended phase, it should run under a goal so it keeps going without "keep going" messages. Claude cannot set `/goal` itself; ask Garrett to type one, for example `/goal every ready, building and in-review row of spec 001 is merged or labeled needs:garrett, shown by gh issue list output, or stop after 12 hours`. While it runs, show `gh issue list` output whenever a row changes state, since the goal's judge only sees the transcript. Route workers by `~/code/g-cauc/routing.md`. When something needs Garrett, label it `needs:garrett` and keep working on the other rows.
+While this session drives builds during the attended phase, it does not start, watch or merge each job itself. Each job event wakes the session and reads its large context again. In the week to 2026-10-07, such events started 62% to 79% of the calls of the CTO sessions. Do this instead:
+
+1. Every 15 minutes, run one foreman pass in a subagent with model `sonnet`. Prompt: `Use the foreman skill for <project> only. It is attended, and its CTO session runs you.` Read only the pass summary.
+2. Between passes, wait with one background `sleep 900`. Start no Monitor, wait loop or background task for a worker job.
+3. Act yourself only on Garrett's messages, on issues labeled `needs:garrett`, and on a summary that reports a park.
+
+The session runs under a goal, so it keeps going without "keep going" messages. Claude cannot set `/goal` itself, so ask Garrett to type one. For example: `/goal every ready, building and in-review row of spec 001 is merged or labeled needs:garrett, shown by gh issue list output, or stop after 12 hours`. The goal's judge sees only the transcript, so show `gh issue list` output after each pass that changes a row.
 
 ## Feature
 
