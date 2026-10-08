@@ -26,7 +26,7 @@ Every prompt starts with the foreman's marker `[ak:<project>#<issue>:<role>:<rou
 cd <worktree> && claude --bg --name "ak-<P>-<N>-<role>" --permission-mode auto --model <model> "<prompt>"
 ```
 
-A Claude build, fix or review always runs with this command, never as an Agent subagent of a CTO session. A subagent with no model of its own runs on the session's model, and its report goes into the session's large context. When a session starts a subagent for research, a digest or log reading, it always sets the model: `haiku` or `sonnet`, and `opus` only for judgment that needs it. The `haiku` alias selects Haiku 4.5 until Claude Code moves it. For Haiku 5.5 in a headless job, use `--model claude-haiku-5-5`.
+A Claude build, fix or PR review always runs with this command, never as an Agent subagent of a CTO session. The product pass has the one exception: its spec review fallback is a subagent with model `opus`. That pass is short and starts with a fresh context. A subagent with no model of its own runs on the session's model, and its report goes into the session's large context. When a session starts a subagent for research, a digest or log reading, it always sets the model: `haiku` or `sonnet`, and `opus` only for judgment that needs it. The `haiku` alias selects Haiku 4.5 until Claude Code moves it. For Haiku 5.5 in a headless job, use `--model claude-haiku-5-5`.
 
 **Codex** (if its sandbox refuses `git push`, it commits and leaves `AK_PR.md`):
 

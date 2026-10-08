@@ -56,7 +56,7 @@ The CTO review runs on the other model family, so the spec gets a real second op
    codex exec -m gpt-6.1-sol --sandbox read-only "Use the cto-review skill. Spec: specs/NNN-slug.md. Round: <n>. Previous review: <path or none>."
    ```
 
-   Save the output to `~/code/<project>_wt/logs/spec-NNN-cto-<n>.md`. If the `codex` lane is out, follow the "CTO review of a spec" row of `~/code/g-cauc/routing.md`: Grok 4.7 high through `cursor-agent` (command in `lanes.md`, read-only, the review printed to stdout), then a fresh-context Claude subagent marked "same family" in the sign-off.
+   Save the output to `~/code/<project>_wt/logs/spec-NNN-cto-<n>.md`. If the `codex` lane is out, follow the "CTO review of a spec" row of `~/code/g-cauc/routing.md`: Grok 4.7 high through `cursor-agent` (command in `lanes.md`, read-only, the review printed to stdout), then a fresh-context Claude subagent with model `opus`, marked "same family" in the sign-off.
 2. Read the verdict.
    - **AGREE**: post the review as a PR comment, then the CTO sign-off quoting its summary line, then the product sign-off. Label the PR and the idea `agreed`. Post a five-line note for Garrett: what, why, size, estimate, and any decision that has a default.
    - **CHANGES**: for each required change, make it or rebut it with evidence in a PR comment. Push and run the loop again.
