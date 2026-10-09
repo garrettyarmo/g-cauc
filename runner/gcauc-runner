@@ -1,13 +1,15 @@
 #!/bin/bash
-# gcauc-runner: the g-cauc CI runner pool on this Mac (see runner/README.md).
+# gcauc-runner: the g-cauc CI runner pool on this machine, a Mac or a Linux box (see runner/README.md).
 #   gcauc-runner up         create or start each repo's VM and build its job image
 #   gcauc-runner serve      keep the slots in runner/repos registered and running jobs (foreground)
 #   gcauc-runner status     each VM, its running job containers, and each repo's g-cauc runners
 #   gcauc-runner rebuild    rebuild the job image in each VM from runner/image/Dockerfile
-#   gcauc-runner install    run `serve` at login and keep it running (a launchd agent)
+#   gcauc-runner install    run `serve` at login and keep it running (launchd, or a systemd user unit)
 #   gcauc-runner uninstall  remove that agent and stop serving
 #   gcauc-runner drain      let running jobs finish and start no new one; serve then exits and the
 #                           agent starts it again with runner/repos (a new repo, a new VM size)
+#   gcauc-runner fleet status|drain|update   run status, drain, or a pull of main and a drain, on
+#                           each machine in runner/hosts
 # Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
 # with another project's. Each job runs in a fresh container registered with a one-job
 # (just-in-time) runner config. The config is minted here, with this Mac's gh login, so no
@@ -16,17 +18,29 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 label=gcauc
+os="$(uname -s)"
+# uname, not hostname: Arch Linux has no hostname command by default.
+host="$(uname -n | cut -d. -f1 | tr '[:upper:]' '[:lower:]')"
+# A machine can have its own sizes in runner/repos.<host>, for example a Linux box with more memory.
 repos_file="$here/repos"
+[ ! -e "$here/repos.$host" ] || repos_file="$here/repos.$host"
 # While this file exists, a slot takes no new job: it stops after its current one (gcauc-runner drain).
 drain_file="$here/.drain"
 # One file per slot, per repo: "free", "waiting" (its runner has no job yet) or "busy". See slot.
 statedir="$here/.slots"
-ncores="$(sysctl -n hw.ncpu)"
-logdir="$HOME/Library/Logs/gcauc-runner"
+if [ "$os" = Darwin ]; then
+  ncores="$(sysctl -n hw.ncpu)"
+  logdir="$HOME/Library/Logs/gcauc-runner"
+  vmtype=vz
+else
+  ncores="$(nproc)"
+  logdir="${XDG_STATE_HOME:-$HOME/.local/state}/gcauc-runner"
+  vmtype=qemu
+fi
 plist="$HOME/Library/LaunchAgents/com.gcauc.runner.plist"
+unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/gcauc-runner.service"
 version="$(sed -n 's#^FROM ghcr.io/actions/actions-runner:##p' "$here/image/Dockerfile")"
 image="gcauc-runner:$version"
-host="$(hostname -s | tr '[:upper:]' '[:lower:]')"
 # A just-in-time runner gets only the labels it is given, so name the defaults GitHub would add.
 case "$(uname -m)" in arm64 | aarch64) arch=ARM64 ;; *) arch=X64 ;; esac
 
@@ -57,7 +71,7 @@ parse() {
 
 up_vm() {
   if ! limactl list -q 2>/dev/null | grep -qx "$vm"; then
-    limactl create --name "$vm" --cpus "$cpus" --memory "$mem" --tty=false "$here/lima.yaml" </dev/null
+    limactl create --name "$vm" --vm-type "$vmtype" --cpus "$cpus" --memory "$mem" --tty=false "$here/lima.yaml" </dev/null
   fi
   if [ "$(limactl list "$vm" --format '{{.Status}}')" != Running ]; then
     limactl start "$vm" --tty=false </dev/null
@@ -147,12 +161,29 @@ prune_stale() {
   done
 }
 
-# The Mac has room for one more job while macOS reports normal memory pressure and the 1-minute
-# load is below the core count. Garrett's own work (builders, reviews, local stacks) comes first.
-mac_has_room() {
+# This machine has room for one more job while its memory is not short and the 1-minute load is
+# below the core count. Garrett's own work (builders, reviews, local stacks) comes first. macOS
+# reports a memory pressure level (1 is normal). Linux has no such level, so there room means that
+# at least 10% of the memory is available.
+host_has_room() {
   local load
-  load="$(sysctl -n vm.loadavg | awk '{ print int($2) }')"
-  [ "$(sysctl -n kern.memorystatus_vm_pressure_level)" = 1 ] && [ "$load" -lt "$ncores" ]
+  if [ "$os" = Darwin ]; then
+    load="$(sysctl -n vm.loadavg | awk '{ print int($2) }')"
+    [ "$(sysctl -n kern.memorystatus_vm_pressure_level)" = 1 ] && [ "$load" -lt "$ncores" ]
+  else
+    load="$(awk '{ print int($1) }' /proc/loadavg)"
+    awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { exit !(a * 10 >= t) }' /proc/meminfo &&
+      [ "$load" -lt "$ncores" ]
+  fi
+}
+
+# The figures that host_has_room reads, for the log.
+host_report() {
+  if [ "$os" = Darwin ]; then
+    echo "load $(sysctl -n vm.loadavg | awk '{ print $2 }'), memory pressure $(sysctl -n kern.memorystatus_vm_pressure_level)"
+  else
+    echo "load $(cut -d' ' -f1 /proc/loadavg), $(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { printf "%d", a * 100 / t }' /proc/meminfo)% of memory available"
+  fi
 }
 
 # Write a slot's state and its process id with a rename, so a reader never sees half a file.
@@ -212,11 +243,11 @@ slot() {
           *) if [ "$m" -lt "$n" ]; then go=0; fi ;;
         esac
       done
-      if [ "$go" = 1 ] && [ "$busyany" = 1 ] && ! mac_has_room; then
+      if [ "$go" = 1 ] && [ "$busyany" = 1 ] && ! host_has_room; then
         go=0
         if [ "$held" = 0 ]; then
           held=1
-          log "$repo slot $n: the Mac is busy (load $(sysctl -n vm.loadavg | awk '{ print $2 }'), memory pressure $(sysctl -n kern.memorystatus_vm_pressure_level)), so this slot waits"
+          log "$repo slot $n: this machine is busy ($(host_report)), so this slot waits"
         fi
       fi
       if [ "$go" = 1 ]; then break; fi
@@ -344,10 +375,18 @@ cmd_status() {
     gh api "repos/$repo/actions/runners?per_page=100" --jq \
       ".runners[] | select([.labels[].name] | index(\"$label\")) | \"  \(.name) \(.status) busy=\(.busy)\""
   done
-  if launchctl print "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1; then echo "launchd: com.gcauc.runner loaded"; else echo "launchd: not installed"; fi
+  if [ "$os" = Darwin ]; then
+    if launchctl print "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1; then echo "launchd: com.gcauc.runner loaded"; else echo "launchd: not installed"; fi
+  else
+    echo "systemd: gcauc-runner.service $(systemctl --user is-active gcauc-runner.service 2>/dev/null || true)"
+  fi
 }
 
 cmd_install() {
+  if [ "$os" != Darwin ]; then
+    install_systemd
+    return
+  fi
   mkdir -p "$logdir" "$(dirname "$plist")"
   cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -369,12 +408,75 @@ EOF
   echo "installed: $plist (log: $logdir/serve.log)"
 }
 
+# Linux: a systemd user unit. Restart=always starts serve again after a drain, as KeepAlive does on
+# the Mac. KillMode=mixed sends TERM to serve alone, so its trap stops the slots and removes the job
+# containers (systemd's default would signal every process of the unit at once). Lingering keeps
+# the unit running with no login session.
+install_systemd() {
+  mkdir -p "$logdir" "$(dirname "$unit")"
+  cat >"$unit" <<EOF
+[Unit]
+Description=g-cauc CI runner pool ($here/README.md)
+After=network-online.target
+
+[Service]
+ExecStart=/bin/bash $here/gcauc-runner serve
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=120
+Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=append:$logdir/serve.log
+StandardError=append:$logdir/serve.log
+
+[Install]
+WantedBy=default.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable --now gcauc-runner.service
+  loginctl enable-linger "$USER" 2>/dev/null || echo "run once: sudo loginctl enable-linger $USER"
+  echo "installed: $unit (log: $logdir/serve.log)"
+}
+
 cmd_uninstall() {
-  launchctl bootout "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1 || true
-  rm -f "$plist"
+  if [ "$os" = Darwin ]; then
+    launchctl bootout "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1 || true
+    rm -f "$plist"
+  else
+    systemctl --user disable --now gcauc-runner.service >/dev/null 2>&1 || true
+    rm -f "$unit"
+    systemctl --user daemon-reload
+  fi
   load_repos
   clear_vms
   echo "uninstalled"
+}
+
+# runner/hosts names the machines that serve this pool, by tailnet name. Each one has its own
+# checkout at ~/code/g-cauc. fleet runs the command here for this machine, and over ssh (Tailscale
+# SSH or OpenSSH) for the others. update pulls main and drains, so serve restarts with the new code.
+cmd_fleet() {
+  local cmd="${1:-status}" h
+  case "$cmd" in status | drain | update) ;; *) echo "usage: gcauc-runner fleet status|drain|update" >&2; exit 2 ;; esac
+  while IFS= read -r h; do
+    echo "== $h"
+    if [ "$h" = "$host" ]; then
+      fleet_one "$cmd" || echo "$h: $cmd failed"
+    else
+      ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" \
+        "PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH \$HOME/code/g-cauc/runner/gcauc-runner fleet-one $cmd" \
+        </dev/null || echo "$h: not reachable, or $cmd failed"
+    fi
+  done < <(sed 's/#.*//' "$here/hosts" | awk 'NF { print $1 }')
+}
+
+fleet_one() {
+  case "$1" in
+    status) cmd_status ;;
+    drain) cmd_drain ;;
+    update) git -C "$here/.." pull -q --ff-only && cmd_drain ;;
+    *) exit 2 ;;
+  esac
 }
 
 case "${1:-}" in
@@ -385,5 +487,7 @@ case "${1:-}" in
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
   drain) cmd_drain ;;
+  fleet) cmd_fleet "${2:-status}" ;;
+  fleet-one) fleet_one "${2:-}" ;;
   *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac

@@ -31,6 +31,7 @@ During a job, its slot records each container that the job creates. After the jo
 - **Ephemeral jobs.** Every job gets a new container and a just-in-time runner registration that is good for exactly one job. Nothing a job writes to its own filesystem reaches the next job.
 - **No reusable credential in the VM.** The one-job configs are minted on the Mac with `gh`; the VM never sees a token. The config goes to the container on stdin, so it is not in the Mac's process list.
 - **No access to the Mac's files.** The VM has no mounts, so a job cannot read `~/.config`, `~/.aws`, `~/.ssh`, or any project's secrets. `gcauc-runner up` refuses a VM that mounts anything.
+- **Open gap: the network.** A job can reach what its machine can reach. That includes the tailnet (2026-10-09: SSH on `lrcp-ops`, `lrl-leadops` and the Mac) and every service on the machine's loopback, which Lima maps to `192.168.5.2` (OrbStack stacks, Ollama and other local apps). A firewall in each VM must block new connections to `100.64.0.0/10`, `fd7a:115c:a1e0::/48` and `192.168.5.2` (except DNS). It must keep the replies to Lima's SSH, which comes from `192.168.5.2`: a rule without connection state cut a VM off on 2026-10-09.
 - **Residual risk, accepted.** Jobs get the VM's Docker socket, because their tests need throwaway databases. A job that deliberately abuses it is root in its project's VM and could tamper with later jobs of the same project (for example, the job image). Everything that reaches a runner is first-party code from Garrett's own branches (private repos, no forks), every PR passes the guard check and a cross-family review where such an exploit would be visible in the diff, and `limactl delete -f gcauc-<repo> && gcauc-runner up` rebuilds that VM from scratch. Some jobs stay on GitHub's machines: a job that judges PR code (CallFlow's guard), and a job with a production credential. On the pool, such a job shares a VM with the PR code. Never point this pool at a public repository or one that accepts fork PRs.
 
 ## Operate it
@@ -48,6 +49,23 @@ After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`.
 A drain takes as long as the longest running job, and no job fails. Do not use `launchctl kickstart -k` while jobs run: it removes every job container. After changing `image/Dockerfile`, run `rebuild`.
 
 The Mac has to be awake and online for CI to run. Jobs queue while it is asleep and GitHub drops a job that waits 24 hours.
+
+## More machines
+
+The pool can run on more than one machine. GitHub gives each job to the first free runner, so the machines need no coordination. A Linux box serves the same way as the Mac, with QEMU VMs in place of Apple's.
+
+To add a Linux box:
+
+1. Install `lima`, the `qemu` system emulator for the machine's CPU type, `gh` and `git`. Put the user in the `kvm` group, so that the VMs use hardware virtualization.
+2. Log in to GitHub on that machine with `gh auth login`. The token must be able to manage the self-hosted runners of the pool's repos. A fine-grained token that is limited to those repos is best.
+3. Clone g-cauc to `~/code/g-cauc`.
+4. If the machine's sizes differ from `runner/repos`, write `runner/repos.<name>`, where the name is the first part of `uname -n`. Leave out a repo that must not run there.
+5. Run `runner/gcauc-runner up`, then `runner/gcauc-runner install`.
+6. Add the machine's tailnet name to `runner/hosts`.
+
+Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet update` pulls main and drains each one. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
+
+The Mac's VMs are ARM, and most Linux boxes are x86, so a job can run on either type. To pin a job to one type, add the label `ARM64` or `X64` to its `runs-on`. The time limits in some tests were measured on the Mac, so check them on the other machine.
 
 ## A project on the pool
 
