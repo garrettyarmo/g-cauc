@@ -17,7 +17,9 @@ gcauc-runner serve                        one fresh container per job, from gcau
 - `runner/lima.yaml`: the template for each repo's VM. Ubuntu 24.04 (the same release as `ubuntu-latest` until GitHub moves it), Docker from Ubuntu's packages. No host mounts, no port forwarding to the Mac, no SSH agent forwarding.
 - `runner/image/Dockerfile`: GitHub's own runner image, pinned, plus `psql` and a checksum-pinned `docker compose`.
 - `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `rebuild`, `install`, `uninstall`).
-- `runner/repos`: the repositories that the pool serves. Each line gives the slots (jobs at the same time), the CPUs and the memory of that repo's VM. The VMs share the Mac's CPUs, so a quiet VM uses almost no CPU. Each VM keeps its memory, so the total memory must leave room for the Mac.
+- `runner/repos`: the repositories that the pool serves. Each line gives the slots (the most jobs at the same time), the CPUs and the memory of that repo's VM. The VMs share the Mac's CPUs, so a quiet VM uses almost no CPU. Each VM keeps its memory, so the total memory must leave room for the Mac.
+
+Slots are a ceiling, not a reservation. Each repo keeps one registered runner that waits for its next job. When that runner takes a job, the next slot registers a new runner, but only while the Mac has room: macOS reports normal memory pressure, and the 1-minute load is less than the number of cores. A repo that has no job in progress always gets a runner. The free slots of a repo take this turn in slot order. Each state file names its slot's process, so the file of a slot that stopped does not count. Thus CI uses all of a free Mac, and it starts fewer jobs while Garrett's own work needs the CPU or the memory. A job that cannot start yet waits in GitHub's queue. The serve log tells when a slot waits for the Mac.
 
 Each slot has its own work folder (`/home/runner/_work-<repo>-<n>`). `scripts/dev` derives the compose project name and the ports from that path. Thus each slot keeps one project name. The two slots of CallFlow, and the two slots of Bison Brain, have different names.
 
