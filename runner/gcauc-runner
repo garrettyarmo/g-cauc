@@ -19,7 +19,7 @@ label=gcauc
 repos_file="$here/repos"
 # While this file exists, a slot takes no new job: it stops after its current one (gcauc-runner drain).
 drain_file="$here/.drain"
-# One file per registered runner, "waiting" (no job yet) or "busy", per repo: see slot.
+# One file per slot, per repo: "free", "waiting" (its runner has no job yet) or "busy". See slot.
 statedir="$here/.slots"
 ncores="$(sysctl -n hw.ncpu)"
 logdir="$HOME/Library/Logs/gcauc-runner"
@@ -155,53 +155,81 @@ mac_has_room() {
   [ "$(sysctl -n kern.memorystatus_vm_pressure_level)" = 1 ] && [ "$load" -lt "$ncores" ]
 }
 
+# Write a slot's state and its process id with a rename, so a reader never sees half a file.
+# It uses the caller's statedir, short, n and me.
+put_state() {
+  printf '%s %s\n' "$1" "$me" >"$statedir/$short/.$n"
+  mv -f "$statedir/$short/.$n" "$statedir/$short/$n"
+}
+
+# Print "slot:state" for each live slot of the caller's repo. A live slot is a child of serve ($$
+# is serve's process id in every slot). A slot that died leaves a file whose process is gone or is
+# something else now, so that file does not count.
+live_states() {
+  local f s p
+  for f in "$statedir/$short"/*; do
+    [ -e "$f" ] || continue
+    s="" p=""
+    read -r s p <"$f" || true
+    if [ -n "$p" ] && [ "$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')" = "$$" ]; then
+      printf '%s:%s\n' "${f##*/}" "$s"
+    fi
+  done
+}
+
 slot() {
   local repo="$1" n="$2" gid="$3" cpuset="$4" vm="$5"
   local short="${repo##*/}"
   # Per repo and slot, so a slot's sweep removes only what that slot started, and scripts/dev gives
   # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
   local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
-  local state="$statedir/$short/$n" lock="$statedir/$short.lock" logf="$logdir/$short-$n.log"
-  local others go held off cpid busy
+  local state="$statedir/$short/$n" logf="$logdir/$short-$n.log"
+  local me w m go busyany held off cpid busy
+  # This slot's process id (bash 3.2 has no BASHPID): exec makes sh the command substitution's shell.
+  me="$(exec sh -c 'echo "$PPID"')"
+  put_state free
   while true; do
     # Slots are a ceiling, not a reservation. Each repo keeps one runner that waits for its next
-    # job; a slot registers only when no other slot of its repo waits. A repo with no job in progress
-    # always may, so each repo always runs 1 job. Beyond that, a slot registers only while the Mac
-    # has room, so CI grows into a free Mac and backs off while Garrett's own work needs it.
+    # job, and the free slots take that turn in slot order: a slot registers only when no live slot
+    # of its repo waits and each live slot with a lower number is busy. A repo with no job in
+    # progress always may, so each repo always runs 1 job. Beyond that, a slot registers only while
+    # the Mac has room, so CI grows into a free Mac and backs off while Garrett's own work needs it.
     held=0
     while true; do
       if [ -e "$drain_file" ]; then
         log "$repo slot $n: draining, so this slot stops"
+        rm -f "$state"
         return 0
       fi
-      if mkdir "$lock" 2>/dev/null; then
-        others="$(cat "$statedir/$short"/* 2>/dev/null || true)"
-        go=0
-        case "$others" in
-          "") go=1 ;;
-          *waiting*) ;;
-          *)
-            if mac_has_room; then
-              go=1
-            elif [ "$held" = 0 ]; then
-              held=1
-              log "$repo slot $n: the Mac is busy (load $(sysctl -n vm.loadavg | awk '{ print $2 }'), memory pressure $(sysctl -n kern.memorystatus_vm_pressure_level)), so this slot waits"
-            fi
-            ;;
+      go=1
+      busyany=0
+      for w in $(live_states); do
+        m="${w%%:*}"
+        [ "$m" != "$n" ] || continue
+        case "${w#*:}" in
+          waiting) go=0 ;;
+          busy) busyany=1 ;;
+          *) if [ "$m" -lt "$n" ]; then go=0; fi ;;
         esac
-        [ "$go" = 0 ] || echo waiting >"$state"
-        rmdir "$lock"
-        [ "$go" = 0 ] || break
+      done
+      if [ "$go" = 1 ] && [ "$busyany" = 1 ] && ! mac_has_room; then
+        go=0
+        if [ "$held" = 0 ]; then
+          held=1
+          log "$repo slot $n: the Mac is busy (load $(sysctl -n vm.loadavg | awk '{ print $2 }'), memory pressure $(sysctl -n kern.memorystatus_vm_pressure_level)), so this slot waits"
+        fi
       fi
+      if [ "$go" = 1 ]; then break; fi
       sleep 10
     done
+    put_state waiting
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
       -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
       -f "labels[]=self-hosted" -f "labels[]=Linux" -f "labels[]=$arch" -f "labels[]=$label" \
       --jq .encoded_jit_config 2>/dev/null)"; then
       log "$repo slot $n: could not mint a runner config; retrying in 60 s"
-      rm -f "$state"
+      put_state free
       sleep 60
       continue
     fi
@@ -233,12 +261,12 @@ slot() {
     while kill -0 "$cpid" 2>/dev/null; do
       if [ "$busy" = 0 ] && tail -c +"$((off + 1))" "$logf" | grep 'Running job:' >/dev/null; then
         busy=1
-        echo busy >"$state"
+        put_state busy
       fi
       sleep 5
     done
     wait "$cpid" || status=$?
-    rm -f "$state"
+    put_state free
     in_vm "$vm" pkill -f "[e]vents-$short-$n " </dev/null >/dev/null 2>&1 || true
     kill "$epid" 2>/dev/null || true
     wait "$epid" 2>/dev/null || true

@@ -6,13 +6,14 @@
 # other VMs (a quiet VM uses almost none); memory is the VM's own, so the total must leave the Mac
 # room (64 GiB, 2026-10-05). Each slot gets CPUs / slots of its VM's CPUs.
 # 2026-10-09: Bison Brain went from 2 slots to 4 (18 runs waited; a job used about 1.5 of its 3
-# CPUs and up to 3 GiB), and myqap from 2 to 4, so the 4 jobs of a myqap run start together.
+# CPUs, and its memory.peak was 3.8 GiB with page cache), and myqap from 2 to 4, so the 4 jobs of
+# a myqap run start together.
 # The Mac has 6 performance and 12 efficiency cores. When all VMs are busy, each gets a share in
 # proportion to its CPUs, so CallFlow (the longest suite) gets the most; myqap's 2 CPUs per slot
 # match GitHub's runners (2026-10-05: CallFlow end-to-end hit its 30-minute limit at 8+8+12).
 # Add a line when a project adopts g-cauc (the adopt skill), then run `gcauc-runner up` and
 # restart the agent with no job running (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
 garrettyarmo/callflow 2 12 12
-garrettyarmo/bisonbrain 4 12 12
+garrettyarmo/bisonbrain 4 12 16
 garrettyarmo/myqap 4 8 10
 garrettyarmo/lrcp-ops 1 2 4
