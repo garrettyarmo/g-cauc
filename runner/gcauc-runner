@@ -19,6 +19,9 @@ label=gcauc
 repos_file="$here/repos"
 # While this file exists, a slot takes no new job: it stops after its current one (gcauc-runner drain).
 drain_file="$here/.drain"
+# One file per registered runner, "waiting" (no job yet) or "busy", per repo: see slot.
+statedir="$here/.slots"
+ncores="$(sysctl -n hw.ncpu)"
 logdir="$HOME/Library/Logs/gcauc-runner"
 plist="$HOME/Library/LaunchAgents/com.gcauc.runner.plist"
 version="$(sed -n 's#^FROM ghcr.io/actions/actions-runner:##p' "$here/image/Dockerfile")"
@@ -144,19 +147,61 @@ prune_stale() {
   done
 }
 
+# The Mac has room for one more job while macOS reports normal memory pressure and the 1-minute
+# load is below the core count. Garrett's own work (builders, reviews, local stacks) comes first.
+mac_has_room() {
+  local load
+  load="$(sysctl -n vm.loadavg | awk '{ print int($2) }')"
+  [ "$(sysctl -n kern.memorystatus_vm_pressure_level)" = 1 ] && [ "$load" -lt "$ncores" ]
+}
+
 slot() {
   local repo="$1" n="$2" gid="$3" cpuset="$4" vm="$5"
   local short="${repo##*/}"
   # Per repo and slot, so a slot's sweep removes only what that slot started, and scripts/dev gives
   # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
   local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
+  local state="$statedir/$short/$n" lock="$statedir/$short.lock" logf="$logdir/$short-$n.log"
+  local others go held off cpid busy
   while true; do
+    # Slots are a ceiling, not a reservation. Each repo keeps one runner that waits for its next
+    # job; a slot registers only when no other slot of its repo waits. A repo with no job in progress
+    # always may, so each repo always runs 1 job. Beyond that, a slot registers only while the Mac
+    # has room, so CI grows into a free Mac and backs off while Garrett's own work needs it.
+    held=0
+    while true; do
+      if [ -e "$drain_file" ]; then
+        log "$repo slot $n: draining, so this slot stops"
+        return 0
+      fi
+      if mkdir "$lock" 2>/dev/null; then
+        others="$(cat "$statedir/$short"/* 2>/dev/null || true)"
+        go=0
+        case "$others" in
+          "") go=1 ;;
+          *waiting*) ;;
+          *)
+            if mac_has_room; then
+              go=1
+            elif [ "$held" = 0 ]; then
+              held=1
+              log "$repo slot $n: the Mac is busy (load $(sysctl -n vm.loadavg | awk '{ print $2 }'), memory pressure $(sysctl -n kern.memorystatus_vm_pressure_level)), so this slot waits"
+            fi
+            ;;
+        esac
+        [ "$go" = 0 ] || echo waiting >"$state"
+        rmdir "$lock"
+        [ "$go" = 0 ] || break
+      fi
+      sleep 10
+    done
     name="$host-$short-$n-$(date +%s)"
     if ! jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" \
       -f name="$name" -F runner_group_id=1 -f work_folder="$work" \
       -f "labels[]=self-hosted" -f "labels[]=Linux" -f "labels[]=$arch" -f "labels[]=$label" \
       --jq .encoded_jit_config 2>/dev/null)"; then
       log "$repo slot $n: could not mint a runner config; retrying in 60 s"
+      rm -f "$state"
       sleep 60
       continue
     fi
@@ -174,12 +219,26 @@ slot() {
       "events-$short-$n {{index .Actor.Attributes \"com.docker.compose.project.working_dir\"}} {{index .Actor.Attributes \"com.docker.compose.project\"}}" \
       </dev/null >"$events" 2>/dev/null &
     epid=$!
+    off="$(wc -c 2>/dev/null <"$logf" || echo 0)"
     # The config goes in on stdin, so it never appears in this Mac's process list.
     printf '%s\n' "$jit" | in_vm "$vm" docker run --rm -i --name "gcauc-$short-$n" --network host \
       --cpuset-cpus "$cpuset" \
       --group-add "$gid" -v /var/run/docker.sock:/var/run/docker.sock \
       --entrypoint bash "$image" -c 'read -r JIT; exec ./run.sh --jitconfig "$JIT"' \
-      >>"$logdir/$short-$n.log" 2>&1 || status=$?
+      >>"$logf" 2>&1 &
+    cpid=$!
+    # The runner logs "Running job:" when GitHub gives it a job. Then this slot is busy, and the next
+    # slot of the repo may register. grep without -q reads all of tail's output (no SIGPIPE).
+    busy=0
+    while kill -0 "$cpid" 2>/dev/null; do
+      if [ "$busy" = 0 ] && tail -c +"$((off + 1))" "$logf" | grep 'Running job:' >/dev/null; then
+        busy=1
+        echo busy >"$state"
+      fi
+      sleep 5
+    done
+    wait "$cpid" || status=$?
+    rm -f "$state"
     in_vm "$vm" pkill -f "[e]vents-$short-$n " </dev/null >/dev/null 2>&1 || true
     kill "$epid" 2>/dev/null || true
     wait "$epid" 2>/dev/null || true
@@ -202,6 +261,7 @@ clear_vms() {
 cmd_serve() {
   mkdir -p "$logdir"
   rm -f "$drain_file"
+  rm -rf "$statedir"
   cmd_up
   local l gid ncpu per windows n pids=()
   for l in ${lines[@]+"${lines[@]}"}; do
@@ -218,6 +278,7 @@ cmd_serve() {
     # No job runs now, so every volume that no container uses is a leftover.
     in_vm "$vm" docker volume prune -af </dev/null >/dev/null 2>&1 || true
     prune_stale "$repo"
+    mkdir -p "$statedir/${repo##*/}"
     for n in $(seq 1 "$slots"); do
       slot "$repo" "$n" "$gid" "$((((n - 1) % windows) * per))-$((((n - 1) % windows) * per + per - 1))" "$vm" </dev/null &
       pids+=($!)

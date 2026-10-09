@@ -2,3 +2,4 @@ limits/
 .claude/worktrees/
 .claude-plugin/types/
 runner/.drain
+runner/.slots/
