@@ -455,26 +455,39 @@ cmd_uninstall() {
 # runner/hosts names the machines that serve this pool, by tailnet name. Each one has its own
 # checkout at ~/code/g-cauc. fleet runs the command here for this machine, and over ssh (Tailscale
 # SSH or OpenSSH) for the others. update pulls main and drains, so serve restarts with the new code.
+# fleet goes on to the next machine after a failure, and exits 1 if any machine failed.
 cmd_fleet() {
-  local cmd="${1:-status}" h
+  local cmd="${1:-status}" h rc=0
   case "$cmd" in status | drain | update) ;; *) echo "usage: gcauc-runner fleet status|drain|update" >&2; exit 2 ;; esac
   while IFS= read -r h; do
     echo "== $h"
+    # This machine also runs the command in its own process: bash ignores set -e inside a command
+    # that || tests, so a failure in a function call here would not stop the command.
     if [ "$h" = "$host" ]; then
-      fleet_one "$cmd" || echo "$h: $cmd failed"
+      "$here/gcauc-runner" fleet-one "$cmd" </dev/null || { echo "$h: $cmd failed"; rc=1; }
     else
       ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" \
         "PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH \$HOME/code/g-cauc/runner/gcauc-runner fleet-one $cmd" \
-        </dev/null || echo "$h: not reachable, or $cmd failed"
+        </dev/null || { echo "$h: not reachable, or $cmd failed"; rc=1; }
     fi
   done < <(sed 's/#.*//' "$here/hosts" | awk 'NF { print $1 }')
+  return "$rc"
 }
 
 fleet_one() {
   case "$1" in
     status) cmd_status ;;
     drain) cmd_drain ;;
-    update) git -C "$here/.." pull -q --ff-only && cmd_drain ;;
+    update)
+      # The pool runs main. A checkout on another branch, or one that cannot fast-forward, stops
+      # before the drain.
+      if [ "$(git -C "$here/.." symbolic-ref --short HEAD 2>/dev/null)" != main ]; then
+        echo "update: $(cd "$here/.." && pwd) is not on main" >&2
+        exit 1
+      fi
+      git -C "$here/.." pull -q --ff-only origin main
+      cmd_drain
+      ;;
     *) exit 2 ;;
   esac
 }

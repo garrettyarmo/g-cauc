@@ -63,7 +63,7 @@ To add a Linux box:
 5. Run `runner/gcauc-runner up`, then `runner/gcauc-runner install`.
 6. Add the machine's tailnet name to `runner/hosts`.
 
-Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet update` pulls main and drains each one. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
+Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet update` pulls main and drains each one. A checkout that is not on main stops before the drain. fleet goes on to the next machine after a failure, and exits 1 if any machine failed. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
 
 The Mac's VMs are ARM, and most Linux boxes are x86, so a job can run on either type. To pin a job to one type, add the label `ARM64` or `X64` to its `runs-on`. The time limits in some tests were measured on the Mac, so check them on the other machine.
 
