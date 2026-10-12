@@ -61,7 +61,7 @@ To add a Linux box:
 3. Clone g-cauc to `~/code/g-cauc`.
 4. If the machine's sizes differ from `runner/repos`, write `runner/repos.<name>`, where the name is the first part of `uname -n`. Leave out a repo that must not run there.
 5. Run `runner/gcauc-runner up`, then `runner/gcauc-runner install`.
-6. Add the machine's tailnet name to `runner/hosts`.
+6. Add the machine's tailnet name to `runner/hosts`. If its user name differs from this machine's, add `Host <name>` with `User <user>` to `~/.ssh/config` on each machine that runs fleet.
 
 Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet update` pulls main and drains each one. A checkout that is not on main stops before the drain. fleet goes on to the next machine after a failure, and exits 1 if any machine failed. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
 
