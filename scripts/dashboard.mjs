@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// The progress page: each project's board (ready, building, in review, needs Garrett, merged)
-// and how fast each project merges, as one HTML file. It reads GitHub with gh, the worker jobs
-// on this Mac, and the local worktrees, and it uses no model. The board's own parsers and
+// The progress page: each project's board (ready, building, in review, needs Garrett, merged),
+// its CI as GitHub Actions lists it with the runner pool's machines, and how fast each project
+// merges, as one HTML file. It reads GitHub with gh, the worker jobs on this Mac, the local
+// worktrees, and each pool machine (over SSH for the others), and it uses no model. The board's own parsers and
 // colors (hooks/lib.js, hooks/draw.js) do the parsing and the colors.
 //
 //   node scripts/dashboard.mjs            write the page once
@@ -17,7 +18,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseProjects, monogram, parseJobs, parseClaudeAgents, laneOf, modelName } from '../hooks/lib.js'
 import { projectColor, ink } from '../hooks/draw.js'
-import { latestChecks } from '../hooks/ci.js'
+import { latestChecks, parseRuns, parseRunJobs, parseRepoSlots } from '../hooks/ci.js'
 
 const kit = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const home = os.homedir()
@@ -183,6 +184,64 @@ function collect(p, jobs, now) {
   }
 }
 
+// CI as GitHub Actions lists it: the jobs that have not finished, and the latest finished runs.
+function ciOf(p) {
+  const runs = parseRuns(run('gh', ['api', `repos/${p.repo}/actions/runs?per_page=30`]))
+  if (!runs) return { repo: p.repo, error: 'gh could not read the Actions runs' }
+  const live = []
+  for (const r of runs.filter((x) => x.status !== 'completed').slice(0, 10)) {
+    for (const j of parseRunJobs(run('gh', ['api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=50`]), r) || []) {
+      if (j.status === 'completed') continue
+      live.push({ repo: p.repo, name: j.name, workflow: j.workflow, branch: j.branch, prs: j.prs, status: j.status, createdAt: j.createdAt, startedAt: j.startedAt, runner: j.runner, labels: j.labels, step: j.step, url: j.url })
+    }
+  }
+  const done = runs.filter((r) => r.status === 'completed').slice(0, 15)
+    .map((r) => ({ repo: p.repo, title: r.title, workflow: r.workflow, branch: r.branch, prs: r.prs, conclusion: r.conclusion, startedAt: r.startedAt, endedAt: r.updatedAt, url: r.url }))
+  return { repo: p.repo, live, done }
+}
+
+// What one pool machine knows about itself: its core count, its load and its memory, read as
+// gcauc-runner's host_has_room reads them, and the state of each live slot from runner/.slots.
+// A slot file counts only while its process is still a gcauc-runner serve (live_states).
+const PROBE = `cd "$HOME/code/g-cauc/runner" || exit 1
+if [ "$(uname)" = Darwin ]; then
+  echo "cores $(sysctl -n hw.ncpu)"; echo "load $(sysctl -n vm.loadavg | awk '{ print $2 }')"
+  echo "pressure $(sysctl -n kern.memorystatus_vm_pressure_level)"
+else
+  echo "cores $(nproc)"; echo "load $(cut -d' ' -f1 /proc/loadavg)"
+  echo "available $(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { printf "%d", a * 100 / t }' /proc/meminfo)"
+fi
+for f in .slots/*/*; do
+  [ -f "$f" ] || continue
+  s="" p=""; read -r s p <"$f" || true
+  case "$(ps -o command= -p "$p" 2>/dev/null)" in *"gcauc-runner serve"*) echo "slot \${f#.slots/} $s" ;; esac
+done`
+
+// Each machine in runner/hosts, with the slots its own runner/repos.<name> (or runner/repos) sets.
+function machines(projs) {
+  const self = os.hostname().split('.')[0].toLowerCase()
+  const hosts = fs.readFileSync(path.join(kit, 'runner/hosts'), 'utf8').split('\n').map((l) => l.replace(/#.*/, '').trim()).filter(Boolean)
+  return hosts.map((name) => {
+    const own = path.join(kit, 'runner/repos.' + name)
+    const repos = parseRepoSlots(fs.readFileSync(fs.existsSync(own) ? own : path.join(kit, 'runner/repos'), 'utf8'))
+    const out = name === self ? run('sh', ['-c', PROBE]) : run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', name, PROBE])
+    if (!out) return { name, error: name === self ? 'could not read this machine' : 'could not reach it over SSH' }
+    const fig = Object.fromEntries(out.split('\n').filter((l) => /^(cores|load|pressure|available) /.test(l)).map((l) => l.split(' ')))
+    const states = new Map(out.split('\n').filter((l) => l.startsWith('slot ')).map((l) => l.split(' ').slice(1)))
+    const cores = Number(fig.cores), load = Number(fig.load)
+    const memOk = fig.pressure != null ? fig.pressure === '1' : Number(fig.available) >= 10
+    return {
+      name, cores, load,
+      memory: fig.pressure != null ? (fig.pressure === '1' ? 'memory normal' : 'memory pressure ' + fig.pressure) : `${fig.available}% memory free`,
+      room: memOk && Math.floor(load) < cores,
+      repos: repos.map((r) => {
+        const short = r.repo.split('/').pop()
+        return { repo: r.repo, slots: Array.from({ length: r.slots }, (_, i) => states.get(`${short}/${i + 1}`) || 'off') }
+      }),
+    }
+  })
+}
+
 function liveJobs(now) {
   const agents = run('claude', ['agents', '--json'])
   const claude = agents === null ? [] : parseClaudeAgents(agents, home, now)
@@ -192,7 +251,12 @@ function liveJobs(now) {
 function write() {
   const now = Date.now()
   const jobs = liveJobs(now)
-  const data = { generated: new Date(now).toISOString(), projects: projects().map((p) => collect(p, jobs, now)) }
+  const projs = projects()
+  const data = {
+    generated: new Date(now).toISOString(),
+    projects: projs.map((p) => collect(p, jobs, now)),
+    ci: { repos: projs.map(ciOf), machines: machines(projs) },
+  }
   fs.mkdirSync(outDir, { recursive: true })
   const html = fs.readFileSync(path.join(kit, 'scripts/dashboard.html'), 'utf8')
     .replace('/*DATA*/null', () => JSON.stringify(data).replace(/</g, '\\u003c'))

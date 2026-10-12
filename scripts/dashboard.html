@@ -44,6 +44,9 @@ a { color: inherit; text-decoration: none; }
 a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 .wrap { max-width: 1440px; margin: 0 auto; padding: var(--s6) var(--s4) var(--s12); }
 header.top { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s6); }
+nav.jump { display: flex; gap: var(--s4); margin-left: auto; }
+nav.jump a { color: var(--fg-2); }
+nav.jump a:hover { color: var(--fg); text-decoration: underline; }
 h1 { font-size: var(--t-h1); font-weight: 600; letter-spacing: -0.01em; margin: 0; }
 h2 { font-size: var(--t-h2); font-weight: 600; margin: 0 0 var(--s1); }
 .sub, .note { color: var(--fg-3); margin: 0; }
@@ -91,6 +94,33 @@ svg.bars .base { stroke: var(--track); }
 svg.bars .hit { fill: transparent; }
 svg.bars .hit:hover + .bar, svg.bars .hit:focus + .bar { opacity: 0.75; }
 
+/* CI: the pool's machines, then the jobs as GitHub Actions lists them. */
+.box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--s1) var(--s4); }
+.box + .box { margin-top: var(--s3); }
+.mrow { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--s4); align-items: center; padding: var(--s3) 0; }
+.mrow + .mrow { border-top: 1px solid var(--border); }
+.mrow .host { font-weight: 600; overflow-wrap: anywhere; }
+.mrow .figs { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s1); }
+.pools { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s6); }
+.pool { display: flex; align-items: center; gap: var(--s2); }
+.pool .busy-n { color: var(--fg-3); }
+.cells { display: flex; gap: 3px; }
+.cell { width: 14px; height: 14px; border-radius: var(--radius-sm); background: var(--track); }
+.cell.busy { background: var(--p); }
+.cell.waiting { background: transparent; box-shadow: inset 0 0 0 2px var(--p); }
+.group { font-size: var(--t-label); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-3); padding: var(--s3) 0 var(--s1); }
+ol.jobs { list-style: none; margin: 0; padding: 0; }
+ol.jobs li { display: grid; grid-template-columns: 96px 22px minmax(0, 1fr) 180px 64px; grid-template-areas: "chip badge main where time"; gap: var(--s3); align-items: center; padding: var(--s2) 0; }
+ol.jobs li + li { border-top: 1px solid var(--border); }
+ol.jobs .chip { grid-area: chip; justify-self: start; }
+ol.jobs .badge { grid-area: badge; }
+ol.jobs .main { grid-area: main; min-width: 0; }
+ol.jobs .main a, ol.jobs .main .meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.jobs .main a:hover { text-decoration: underline; }
+ol.jobs .meta, ol.jobs .where { color: var(--fg-3); }
+ol.jobs .where { grid-area: where; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.jobs .time { grid-area: time; text-align: right; }
+
 /* Latest. */
 ol.latest { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 ol.latest li { display: grid; grid-template-columns: 56px 22px minmax(0, 1fr); gap: var(--s3); align-items: center; padding: var(--s2) var(--s4); }
@@ -109,6 +139,9 @@ ol.latest .verb { color: var(--fg-3); }
   .srow .chart { grid-column: 1 / -1; grid-row: 2; }
   .srow .med, .srow.head .med { display: none; }
   ol.latest li { grid-template-columns: 48px 22px minmax(0, 1fr); padding: var(--s2) var(--s3); }
+  .mrow { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  ol.jobs li { grid-template-columns: 22px auto minmax(0, 1fr) 56px; grid-template-areas: "badge main main time" ". chip where where"; row-gap: var(--s1); }
+  ol.jobs .where { text-align: right; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -118,12 +151,19 @@ ol.latest .verb { color: var(--fg-3); }
   <header class="top">
     <h1>Progress</h1>
     <p class="sub" id="updated"></p>
+    <nav class="jump" aria-label="Sections"><a href="#h-board">Board</a><a href="#h-ci">CI</a><a href="#h-speed">Speed</a><a href="#h-latest">Latest</a></nav>
   </header>
   <main>
     <section aria-labelledby="h-board">
       <h2 id="h-board">Board</h2>
       <p class="note">Each card opens on GitHub. Cards come from issue labels, open PRs, worker jobs on this Mac, and slice worktrees with no PR yet.</p>
       <div id="board"></div>
+    </section>
+    <section aria-labelledby="h-ci">
+      <h2 id="h-ci">CI</h2>
+      <p class="note" id="ci-sum"></p>
+      <div id="machines"></div>
+      <div id="jobs"></div>
     </section>
     <section aria-labelledby="h-speed">
       <h2 id="h-speed">Speed</h2>
@@ -247,6 +287,89 @@ function latest(projects) {
     el('a', { href: e.url, target: '_blank', rel: 'noopener' }, el('span', { class: 'verb' }, `${e.verb} ${e.id} `), e.title)))
 }
 
+// CI. A pool job runs on a machine of runner/hosts, and its runner's name starts with that machine.
+const fmtDur = (sec) => sec < 60 ? Math.round(sec) + 's' : sec < 3600 ? Math.round(sec / 60) + 'm' : (sec / 3600).toFixed(1) + 'h'
+const since = (iso) => Math.max(0, (Date.now() - Date.parse(iso)) / 1000)
+const SLOT = { busy: 'running a job', waiting: 'registered, waiting for a job', free: 'free', off: 'not running' }
+
+function where(j, hosts) {
+  if (j.runner) return hosts.find((h) => j.runner.startsWith(h + '-')) || 'GitHub-hosted'
+  if (!j.labels.includes('gcauc')) return 'GitHub-hosted: ' + j.labels.join(', ')
+  const arch = j.labels.find((l) => l === 'ARM64' || l === 'X64')
+  return 'Pool' + (arch ? ', ' + arch + ' only' : '')
+}
+
+function machineRow(m, byRepo) {
+  const head = el('div', {}, el('div', { class: 'host' }, m.name))
+  if (m.error) {
+    head.append(el('div', { class: 'figs' }, chip({ text: 'No answer', tone: 'bad' })))
+    return el('div', { class: 'mrow' }, head, el('div', { class: 'note' }, m.error))
+  }
+  head.append(el('div', { class: 'figs' },
+    chip(m.room ? { text: 'Has room', tone: 'good' } : { text: 'Full: extra slots wait', tone: 'warn' }),
+    el('span', { class: 'chip num' }, `load ${m.load.toFixed(1)} of ${m.cores} cores`),
+    el('span', { class: 'chip' }, m.memory)))
+  const pools = m.repos.map((r) => {
+    const p = byRepo[r.repo] || { name: r.repo.split('/').pop(), color: 'var(--muted)', ink: '#fff', mono: '?' }
+    const busy = r.slots.filter((x) => x === 'busy').length
+    return el('div', { class: 'pool', style: projVars(p) }, badge(p),
+      el('span', { class: 'cells', role: 'img', 'aria-label': `${p.name}: ${busy} of ${r.slots.length} slots busy` },
+        r.slots.map((st, i) => el('span', { class: 'cell ' + st, tabindex: 0, 'data-tip': `${p.name} slot ${i + 1}: ${SLOT[st] || st}` }))),
+      el('span', { class: 'busy-n num' }, `${busy} of ${r.slots.length}`))
+  })
+  return el('div', { class: 'mrow' }, head, el('div', { class: 'pools' }, pools.length ? pools : el('span', { class: 'empty' }, 'Serves no repo.')))
+}
+
+function jobRow(j, p, tone, label, time, meta, place) {
+  return el('li', {},
+    chip({ text: label, tone }),
+    badge(p),
+    el('div', { class: 'main' },
+      el('a', { href: j.url || null, target: '_blank', rel: 'noopener' }, j.name || j.title),
+      el('span', { class: 'meta' }, meta)),
+    el('span', { class: 'where' }, place || ''),
+    el('span', { class: 'time num' }, time))
+}
+
+function ci() {
+  const c = DATA.ci || { repos: [], machines: [] }
+  const byRepo = Object.fromEntries(DATA.projects.map((p) => [p.repo, p]))
+  const hosts = c.machines.map((m) => m.name)
+  const ref = (j) => j.prs.length ? 'PR ' + j.prs[0] : j.branch
+  const live = c.repos.flatMap((r) => r.live || [])
+  const running = live.filter((j) => j.status === 'in_progress').sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  const queued = live.filter((j) => j.status !== 'in_progress').sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  const seen = new Set()
+  const done = c.repos.flatMap((r) => r.done || []).sort((a, b) => Date.parse(b.endedAt) - Date.parse(a.endedAt))
+    .filter((r) => { const k = [r.repo, r.workflow, r.branch, r.title].join('|'); return !seen.has(k) && seen.add(k) }).slice(0, 15)
+  const slots = c.machines.flatMap((m) => (m.repos || []).flatMap((r) => r.slots))
+
+  document.getElementById('ci-sum').textContent = `${running.length} running · ${queued.length} queued` +
+    (queued.length ? `, the oldest for ${fmtDur(since(queued[0].createdAt))}` : '') +
+    ` · ${slots.filter((x) => x === 'busy').length} of ${slots.length} pool slots busy. Each job opens on GitHub.`
+
+  const rows = []
+  const group = (title, items) => {
+    rows.push(el('div', { class: 'group' }, `${title} `, el('span', { class: 'num' }, items.length)))
+    rows.push(el('ol', { class: 'jobs' }, items.length ? items : el('li', { class: 'empty' }, 'None')))
+  }
+  group('Running', running.map((j) => jobRow(j, byRepo[j.repo], 'warn', 'Running', fmtDur(since(j.startedAt)),
+    `${j.workflow} · ${ref(j)}${j.step ? ' · ' + j.step : ''}`, where(j, hosts))))
+  group('Queued', queued.map((j) => jobRow(j, byRepo[j.repo], 'warn', j.status === 'queued' ? 'Queued' : j.status, fmtDur(since(j.createdAt)),
+    `${j.workflow} · ${ref(j)}`, where(j, hosts))))
+  const CONC = { success: ['good', 'Passed'], failure: ['bad', 'Failed'], timed_out: ['bad', 'Timed out'], cancelled: ['muted', 'Cancelled'], skipped: ['muted', 'Skipped'] }
+  group('Finished, latest', done.map((r) => {
+    const [tone, label] = CONC[r.conclusion] || ['muted', r.conclusion || 'Done']
+    return jobRow(r, byRepo[r.repo], tone, label, fmtDur(Math.max(0, (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000)),
+      `${r.workflow} · ${ref(r)} · ended ${ago(r.endedAt)} ago`, '')
+  }))
+  for (const r of c.repos.filter((x) => x.error)) rows.push(el('div', { class: 'error' }, chip({ text: 'Could not read CI', tone: 'bad' }), `${r.repo}: ${r.error}`))
+
+  document.getElementById('machines').replaceChildren(el('div', { class: 'box' },
+    c.machines.length ? c.machines.map((m) => machineRow(m, byRepo)) : el('div', { class: 'empty' }, 'No machines in runner/hosts.')))
+  document.getElementById('jobs').replaceChildren(el('div', { class: 'box' }, rows))
+}
+
 function render() {
   const up = document.getElementById('updated')
   if (!DATA) {
@@ -257,6 +380,7 @@ function render() {
   up.replaceChildren(`${DATA.projects.length} projects · updated ${ago(DATA.generated)} ago`,
     age > 15 ? el('span', {}, ' ', chip({ text: 'Old data: the update job may be off', tone: 'warn' })) : '')
   document.getElementById('board').replaceChildren(...(DATA.projects.length ? DATA.projects.map(lane) : [el('p', { class: 'empty' }, 'No projects in projects.md.')]))
+  ci()
   document.getElementById('speed').replaceChildren(speed(DATA.projects))
   document.getElementById('latest').replaceChildren(...latest(DATA.projects))
 }
