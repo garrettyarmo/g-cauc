@@ -200,8 +200,10 @@ function ciOf(p) {
   const active = new Map(ACTIVE.flatMap((st) => runsOf(p.repo, st, 100, errors)).map((r) => [r.id, r]))
   const live = []
   for (const r of active.values()) {
-    const jobs = parseRunJobs(run('gh', ['api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=100`]), r)
+    const text = run('gh', ['api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=100`])
+    const jobs = parseRunJobs(text, r)
     if (!jobs) { errors.push(`gh could not read the jobs of run ${r.id} (${r.workflow}, ${r.branch})`); continue }
+    if (JSON.parse(text).total_count > jobs.length) errors.push(`run ${r.id} (${r.workflow}, ${r.branch}) has more than 100 jobs, so some are missing`)
     for (const j of jobs) {
       if (j.status === 'completed') continue
       live.push({ repo: p.repo, name: j.name, workflow: j.workflow, branch: j.branch, prs: j.prs, status: j.status, createdAt: j.createdAt, startedAt: j.startedAt, runner: j.runner, labels: j.labels, step: j.step, url: j.url })

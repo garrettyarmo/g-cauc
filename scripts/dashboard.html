@@ -346,7 +346,7 @@ function ci() {
 
   document.getElementById('ci-sum').textContent = `${running.length} running · ${queued.length} queued` +
     (queued.length ? `, the oldest for ${fmtDur(since(queued[0].createdAt))}` : '') +
-    ` · ${slots.filter((x) => x === 'busy').length} of ${slots.length} pool slots busy. Each job opens on GitHub.`
+    ` · ${slots.filter((x) => x === 'busy').length} of ${slots.length} pool slots busy. A job runs on the machine its row names, and GitHub keeps its log, so each row opens there.`
 
   const rows = []
   const group = (title, items) => {
