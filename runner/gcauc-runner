@@ -308,8 +308,8 @@ slot() {
     # A runner that ends within 60 s with no job did not start, for example because its VM stopped or
     # its container name is in use (2026-10-12: one slot registered 1,562 runners in 7 hours). Each
     # such runner doubles the wait before the next registration, from 20 s up to 300 s. A job resets
-    # the wait.
-    if [ "$busy" = 1 ]; then
+    # the wait. Read the log again: a short job can start and end between two polls (review B1).
+    if tail -c +"$((off + 1))" "$logf" | grep 'Running job:' >/dev/null; then
       backoff=0
     elif [ "$(($(date +%s) - started))" -lt 60 ]; then
       if [ "$backoff" = 0 ]; then
