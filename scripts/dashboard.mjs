@@ -185,19 +185,31 @@ function collect(p, jobs, now) {
 }
 
 // CI as GitHub Actions lists it: the jobs that have not finished, and the latest finished runs.
+// The runs API filters on one status a call, so each unfinished status is its own call. Any read
+// that fails or comes back cut short goes in `error`, so the page never shows a short list as whole.
+const ACTIVE = ['in_progress', 'queued', 'waiting', 'pending', 'requested']
+function runsOf(repo, status, perPage, errors) {
+  const text = run('gh', ['api', `repos/${repo}/actions/runs?status=${status}&per_page=${perPage}`])
+  const runs = parseRuns(text)
+  if (!runs) errors.push(`gh could not read the ${status} runs`)
+  else if (status !== 'completed' && JSON.parse(text).total_count > runs.length) errors.push(`more than ${perPage} ${status} runs, so some are missing`)
+  return runs || []
+}
 function ciOf(p) {
-  const runs = parseRuns(run('gh', ['api', `repos/${p.repo}/actions/runs?per_page=30`]))
-  if (!runs) return { repo: p.repo, error: 'gh could not read the Actions runs' }
+  const errors = []
+  const active = new Map(ACTIVE.flatMap((st) => runsOf(p.repo, st, 100, errors)).map((r) => [r.id, r]))
   const live = []
-  for (const r of runs.filter((x) => x.status !== 'completed').slice(0, 10)) {
-    for (const j of parseRunJobs(run('gh', ['api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=50`]), r) || []) {
+  for (const r of active.values()) {
+    const jobs = parseRunJobs(run('gh', ['api', `repos/${p.repo}/actions/runs/${r.id}/jobs?per_page=100`]), r)
+    if (!jobs) { errors.push(`gh could not read the jobs of run ${r.id} (${r.workflow}, ${r.branch})`); continue }
+    for (const j of jobs) {
       if (j.status === 'completed') continue
       live.push({ repo: p.repo, name: j.name, workflow: j.workflow, branch: j.branch, prs: j.prs, status: j.status, createdAt: j.createdAt, startedAt: j.startedAt, runner: j.runner, labels: j.labels, step: j.step, url: j.url })
     }
   }
-  const done = runs.filter((r) => r.status === 'completed').slice(0, 15)
+  const done = runsOf(p.repo, 'completed', 30, errors)
     .map((r) => ({ repo: p.repo, title: r.title, workflow: r.workflow, branch: r.branch, prs: r.prs, conclusion: r.conclusion, startedAt: r.startedAt, endedAt: r.updatedAt, url: r.url }))
-  return { repo: p.repo, live, done }
+  return { repo: p.repo, live, done, error: errors.length ? errors.join('; ') : null }
 }
 
 // What one pool machine knows about itself: its core count, its load and its memory, read as
@@ -205,11 +217,11 @@ function ciOf(p) {
 // A slot file counts only while its process is still a gcauc-runner serve (live_states).
 const PROBE = `cd "$HOME/code/g-cauc/runner" || exit 1
 if [ "$(uname)" = Darwin ]; then
-  echo "cores $(sysctl -n hw.ncpu)"; echo "load $(sysctl -n vm.loadavg | awk '{ print $2 }')"
-  echo "pressure $(sysctl -n kern.memorystatus_vm_pressure_level)"
+  c=$(sysctl -n hw.ncpu) && l=$(sysctl -n vm.loadavg) && m=$(sysctl -n kern.memorystatus_vm_pressure_level) || exit 1
+  echo "cores $c"; echo "load $(echo "$l" | awk '{ print $2 }')"; echo "pressure $m"
 else
-  echo "cores $(nproc)"; echo "load $(cut -d' ' -f1 /proc/loadavg)"
-  echo "available $(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { printf "%d", a * 100 / t }' /proc/meminfo)"
+  c=$(nproc) && l=$(cut -d' ' -f1 /proc/loadavg) && m=$(awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { if (t) printf "%d", a * 100 / t }' /proc/meminfo) || exit 1
+  echo "cores $c"; echo "load $l"; echo "available $m"
 fi
 for f in .slots/*/*; do
   [ -f "$f" ] || continue
@@ -228,7 +240,9 @@ function machines(projs) {
     if (!out) return { name, error: name === self ? 'could not read this machine' : 'could not reach it over SSH' }
     const fig = Object.fromEntries(out.split('\n').filter((l) => /^(cores|load|pressure|available) /.test(l)).map((l) => l.split(' ')))
     const states = new Map(out.split('\n').filter((l) => l.startsWith('slot ')).map((l) => l.split(' ').slice(1)))
-    const cores = Number(fig.cores), load = Number(fig.load)
+    const num = (x) => /^\d+(\.\d+)?$/.test(x || '') ? Number(x) : NaN
+    const cores = num(fig.cores), load = num(fig.load)
+    if (!(cores > 0) || Number.isNaN(load) || Number.isNaN(num(fig.pressure ?? fig.available))) return { name, error: 'it gave no core count, load or memory reading' }
     const memOk = fig.pressure != null ? fig.pressure === '1' : Number(fig.available) >= 10
     return {
       name, cores, load,
