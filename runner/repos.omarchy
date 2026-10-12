@@ -1,5 +1,5 @@
-# omarchy: Ryzen 7 8700G (8 cores, 16 threads), 30 GiB, x86. The two VMs take 22 GiB and leave
-# 8 GiB for the desktop. Same columns as runner/repos.
+# omarchy: Ryzen 7 8700G (8 cores, 16 threads), 30 GiB, x86. myqap's VM takes 10 GiB. With Bison
+# Brain's VM too, they take 22 GiB and leave 8 GiB for the desktop. Same columns as runner/repos.
 garrettyarmo/myqap 3 8 10
 # Not yet: Bison Brain's deploy-staging builds linux/arm64 images, so it must pin ARM64 first.
 # garrettyarmo/bisonbrain 3 10 12
