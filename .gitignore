@@ -3,3 +3,4 @@ limits/
 .claude-plugin/types/
 runner/.drain
 runner/.slots/
+dashboard/
