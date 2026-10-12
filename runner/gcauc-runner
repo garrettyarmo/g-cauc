@@ -215,10 +215,11 @@ slot() {
   # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
   local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
   local state="$statedir/$short/$n" logf="$logdir/$short-$n.log"
-  local me w m go busyany held off cpid busy
+  local me w m go busyany held off cpid busy started backoff
   # This slot's process id (bash 3.2 has no BASHPID): exec makes sh the command substitution's shell.
   me="$(exec sh -c 'echo "$PPID"')"
   put_state free
+  backoff=0
   while true; do
     # Slots are a ceiling, not a reservation. Each repo keeps one runner that waits for its next
     # job, and the free slots take that turn in slot order: a slot registers only when no live slot
@@ -279,6 +280,7 @@ slot() {
       </dev/null >"$events" 2>/dev/null &
     epid=$!
     off="$(wc -c 2>/dev/null <"$logf" || echo 0)"
+    started="$(date +%s)"
     # The config goes in on stdin, so it never appears in this Mac's process list.
     printf '%s\n' "$jit" | in_vm "$vm" docker run --rm -i --name "gcauc-$short-$n" --network host \
       --cpuset-cpus "$cpuset" \
@@ -303,6 +305,22 @@ slot() {
     wait "$epid" 2>/dev/null || true
     sweep "$vm" "/home/runner/$work/" "$events"
     log "$repo slot $n: $name finished (exit $status)"
+    # A runner that ends within 60 s with no job did not start, for example because its VM stopped or
+    # its container name is in use (2026-10-12: one slot registered 1,562 runners in 7 hours). Each
+    # such runner doubles the wait before the next registration, from 20 s up to 300 s. A job resets
+    # the wait.
+    if [ "$busy" = 1 ]; then
+      backoff=0
+    elif [ "$(($(date +%s) - started))" -lt 60 ]; then
+      if [ "$backoff" = 0 ]; then
+        log "$repo slot $n: its runners end with no job, so it waits longer before each new one (up to 300 s)"
+      fi
+      backoff=$((backoff * 2))
+      [ "$backoff" -ge 20 ] || backoff=20
+      [ "$backoff" -le 300 ] || backoff=300
+      sleep "$backoff"
+      continue
+    fi
     [ "$status" -eq 0 ] || sleep 10
   done
 }
