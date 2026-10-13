@@ -17,6 +17,8 @@ The foreman's prompt gives you the repo, the issue number, the worktree path, th
 6. **Commit** on the branch `build/<N>-<slug>`.
 7. **Open the PR** with the body below. Copy the issue's `lane:`, `area:`, `size:` and `risk:` labels, add `in-review`, and remove `building` from the issue. Unless the issue is `risk:high`, turn on auto-merge: `gh pr merge <pr> --auto --merge`. GitHub merges it only when every required check passes.
 
+If your sandbox blocks Docker (Muse jobs), you cannot start a database or `scripts/dev up`. Run each gate that needs no database with `scripts/done --fast --gate <name>`. In the PR, name each gate that you could not run. Write "not run here: the sandbox has no Docker, so CI runs it". Do not try to turn the sandbox off.
+
 If your sandbox refuses `git push` or `gh`, write the PR body to `AK_PR.md` at the worktree root (it is gitignored), make sure everything else is committed, and stop. The foreman pushes and opens the PR.
 
 ## Fix rounds
