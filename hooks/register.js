@@ -1,7 +1,7 @@
 // g-cauc mod: the /board pane, the quiet line above the prompt, and the
-// permission advisor. It reads GitHub, the process list and job logs on a
-// timer; it holds no state of record (GitHub and git do), only a shared cache
-// in $.store so several open sessions make one set of gh calls.
+// permission advisor. It reads the process list and job logs on a timer, and
+// GitHub only on demand; it holds no state of record (GitHub and git do), only
+// a shared cache in $.store so several open sessions make one set of gh calls.
 
 import {
   parseProjects, parseLanes, summarizeProject, parseJobs, laneOf, modelName, parseEtime,
@@ -14,13 +14,12 @@ import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline
 const PANE = 'g-cauc-board'
 // GitHub budget. Every Claude Code session on the Mac runs this module, and
 // all of them share one GraphQL limit (5,000 an hour, across Garrett's tokens),
-// so the GitHub part of a refresh is shared: one session reads GitHub at a
-// time (the lease), not more often than the cadence, and every session stops
-// for a while after GitHub says "rate limit". Local data (jobs, logs, lanes)
-// still updates on every tick.
-const GH_OPEN_MS = 2 * 60_000 // a /board pane is open in some session
-const GH_QUIET_MS = 10 * 60_000 // nobody is looking: only the quiet line reads it
-const VIEWER_MS = 3 * 60_000 // a pane counts as open this long after its last tick
+// so the board reads GitHub only on demand: when /board opens and the shared
+// snapshot is old, and on /board refresh or the Refresh button. One session
+// reads GitHub at a time (the lease), and every session stops for a while after
+// GitHub says "rate limit". The timers read local data (jobs, logs, lanes) and
+// pick up the snapshot any session saved.
+const FRESH_MS = 2 * 60_000 // opening /board reads GitHub when the snapshot is older than this
 const LEASE_MS = 2 * 60_000 // how long one session may hold the GitHub read
 const PAUSE_MS = 10 * 60_000 // the stop after a rate limit
 const ME = Math.random().toString(36).slice(2)
@@ -28,6 +27,10 @@ const ME = Math.random().toString(36).slice(2)
 // snapshot an older version of the board wrote.
 const CI_SNAPSHOT = 'ci-snapshot-2'
 const APPROVALS_TO_SUGGEST = 10
+// How much GitHub a refresh reads: none (a timer), only an old snapshot (opening /board), or now (Refresh).
+const LOCAL = 0
+const IF_OLD = 1
+const NOW = 2
 
 let home = ''
 // Where projects.md, lanes.md and limits/ live: the plugin's kit_dir setting.
@@ -51,7 +54,7 @@ let pausedUntil = 0
 // Open PRs per repo from this gather's project read, so the CI read reuses them.
 const openPrsByRepo = new Map()
 let busy = false
-let again = false
+let again = LOCAL
 
 let paneOpen = false
 let tab = 'all'
@@ -70,21 +73,21 @@ export function register(on, options) {
     await $.command.register({ name: 'board', description: 'g-cauc: each project\'s plan, agents and CI; the shared lanes and pool; allow-list suggestions', argumentHint: '[refresh]', immediate: true })
     home = (await $.env.get('HOME')) || ''
     kitDir = kitSetting.replace(/^~(?=\/|$)/, home).replace(/\/$/, '')
-    $.clock.after(1500, () => refresh($, false))
-    $.clock.every(60_000, () => refresh($, false))
+    $.clock.after(1500, () => refresh($, LOCAL))
+    $.clock.every(60_000, () => refresh($, LOCAL))
     $.clock.every(4_000, () => followJob($))
     return result
   })
 
   on('command.run', { command: 'board' }, async ($, e) => {
     if (String(e.args || '').trim() === 'refresh') {
-      await refresh($, true)
+      await refresh($, NOW)
       return { text: 'g-cauc: refreshed' }
     }
     paneOpen = true
     await $.ui.open({ id: PANE, title: 'g-cauc', focus: true, closeOnEscape: true })
-    // Opening the board shows the shared snapshot at once and reads GitHub only when it is due.
-    refresh($, false)
+    // Opening the board shows the shared snapshot at once and reads GitHub only when the snapshot is old.
+    refresh($, IF_OLD)
     return {}
   })
 
@@ -102,7 +105,8 @@ export function register(on, options) {
     const theirs = await next(e)
     const parts = [E.Text({ dimColor: true, children: [(line || 'g-cauc') + (cib ? ' · ' + cib.text : '')] })]
     if (cib && cib.alert) parts.push(colored(E, e.surface, 'bad', ' · ' + cib.alert, { bold: true }))
-    parts.push(E.Text({ dimColor: true, children: ['   /board'] }))
+    const age = refreshedAt ? ' · ' + fmtDuration(((await $.clock.now()) - refreshedAt) / 1000) + ' ago' : ''
+    parts.push(E.Text({ dimColor: true, children: ['   /board' + age] }))
     const mine = E.Box({ flexDirection: 'row', children: parts })
     return E.Box({ flexDirection: 'column', children: theirs ? [theirs, mine] : [mine] })
   })
@@ -191,9 +195,9 @@ async function readText($, path) {
   }
 }
 
-async function refresh($, force) {
+async function refresh($, gh) {
   if (busy) {
-    again = again || force
+    again = Math.max(again, gh)
     return
   }
   busy = true
@@ -201,18 +205,15 @@ async function refresh($, force) {
   let holding = false
   try {
     const now = await $.clock.now()
-    if (paneOpen) await $.store.set('viewer', { at: now })
-    const viewer = await $.store.get('viewer')
-    const every = viewer && now - viewer.at < VIEWER_MS ? GH_OPEN_MS : GH_QUIET_MS
     const pause = await $.store.get('gh-pause')
     pausedUntil = pause && now < pause.until ? pause.until : 0
     cached = await $.store.get('snapshot')
     const ciCached = await $.store.get(CI_SNAPSHOT)
     lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
-    // A forced refresh (the Refresh button) skips the cadence and the lease, never the pause.
-    // 5 seconds of slack, so a read lands on the minute tick it is due on, not the next one.
-    let due = !pausedUntil && (force || !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= every - 5_000)
-    if (due && !force) {
+    // Refresh skips the age check and the lease, never the pause.
+    const old = !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= FRESH_MS
+    let due = !pausedUntil && (gh === NOW || (gh === IF_OLD && old))
+    if (due && gh !== NOW) {
       const lease = await $.store.get('gh-lease')
       if (lease && lease.by !== ME && now - lease.at < LEASE_MS) due = false
     }
@@ -265,8 +266,9 @@ async function refresh($, force) {
     busy = false
     $.ui.invalidate('ui.render')
     if (again) {
-      again = false
-      refresh($, true)
+      const next = again
+      again = LOCAL
+      refresh($, next)
     }
   }
 }
@@ -454,7 +456,7 @@ async function gatherCi($, cached, now) {
   return { at: now, projects: out, billing: await billing($, cached) }
 }
 
-// Actions minutes this month, when the gh token has the user scope; checked every 10 minutes.
+// Actions minutes this month, when the gh token has the user scope; read at most every 10 minutes, on a GitHub read.
 async function billing($, cached) {
   if (Date.now() - billingAt < 10 * 60_000) return (cached && cached.billing) || ci.billing
   billingAt = Date.now()
@@ -470,6 +472,8 @@ async function billing($, cached) {
 }
 
 async function toastNewNeeds($) {
+  // No snapshot yet (a cold start before the first read): nothing to compare.
+  if (!projects.length) return
   const seen = await $.store.get('needsSeen')
   const ok = projects.filter((p) => !p.stale)
   const kept = Array.isArray(seen) ? seen.filter((k) => projects.some((p) => p.stale && k.startsWith(p.repo + '#'))) : []
@@ -612,7 +616,7 @@ function boardView($, E, width, surface) {
     columnGap: 2,
     children: [
       Text({ dimColor: true, children: [busy ? 'refreshing…' : 'updated ' + age] }),
-      Button({ key: 'refresh', label: 'Refresh', hotkey: 'r', plain: true, dimColor: true, onPress: () => { refresh($, true) } }),
+      Button({ key: 'refresh', label: 'Refresh', hotkey: 'r', plain: true, dimColor: true, onPress: () => { refresh($, NOW) } }),
       ...(pausedUntil > Date.now() ? [colored(E, surface, 'warn', `GitHub rate limit: paused for ${Math.ceil((pausedUntil - Date.now()) / 60_000)} more min`)] : []),
       ...(lastError ? [colored(E, surface, 'bad', lastError.slice(0, 80))] : []),
     ],
