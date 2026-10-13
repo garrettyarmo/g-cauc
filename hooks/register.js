@@ -214,14 +214,21 @@ async function refresh($, gh) {
     // Refresh skips the age check. It never skips the lease or the pause.
     const old = !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= FRESH_MS
     let due = !pausedUntil && (gh === NOW || (gh === IF_OLD && old))
+    let checked = 0
     if (due) {
+      checked = await $.clock.now()
       const lease = await $.store.get('gh-lease')
-      if (lease && lease.by !== ME && now - lease.at < LEASE_MS) due = false
+      if (lease && now - lease.at < LEASE_MS) due = false
     }
     if (due) {
       // $.store has no atomic write, so two sessions can both find the lease free.
       // Each one claims it, waits, and reads it again. Only the last claim reads GitHub (Fischer's lock).
+      // The lock holds only when each claim lands well inside the wait. A late claim gives up.
+      // Its lease stays until it expires, and it stops this session too.
       await $.store.set('gh-lease', { at: now, by: ME })
+      if ((await $.clock.now()) - checked >= CLAIM_MS / 2) due = false
+    }
+    if (due) {
       await $.clock.sleep(CLAIM_MS)
       const lease = await $.store.get('gh-lease')
       due = Boolean(lease && lease.by === ME)

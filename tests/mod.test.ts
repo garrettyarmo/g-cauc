@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, calls: [] as string[] }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, slowLease: false, answerLease: null as null | (() => void), calls: [] as string[] }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -67,7 +67,15 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('store.get', ($, e) => ({ value: saved.get(e.key) }))
+  on('store.get', async ($, e) => {
+    const value = saved.get(e.key)
+    // A slow store: the read sees the lease as it is now, and answers when the test calls answerLease
+    if (e.key === 'gh-lease' && world.slowLease) {
+      world.slowLease = false
+      await new Promise<void>((resolve) => { world.answerLease = resolve })
+    }
+    return { value }
+  })
   on('store.set', ($, e) => {
     saved.set(e.key, e.value)
     return { value: undefined }
@@ -516,6 +524,35 @@ test('when two sessions claim a free lease at once, only the last claim reads Gi
   expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: 'another session' })
   // With no other claim, the next Refresh reads and then frees the lease
   saved.delete('gh-lease')
+  await board($, clock)
+  expect(issueReads()).toBe(1)
+  expect(saved.get('gh-lease')).toBeUndefined()
+})
+
+test('a claim that lands late gives up, so it never overlaps the session that reads', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  // This session finds the lease free, but the store answers late. Another session claims the lease in the meantime.
+  world.slowLease = true
+  await $.command.run({ command: 'board', args: 'refresh' })
+  await clock.settle()
+  expect(typeof world.answerLease).toBe('function')
+  saved.set('gh-lease', { at: clock.now(), by: 'another session' })
+  await clock.advance(CLAIM)
+  world.answerLease()
+  world.answerLease = null
+  await clock.settle()
+  await clock.advance(CLAIM)
+  expect(ghCalls()).toBe(0)
+  // The late claim stays until it expires, and it stops this session too
+  expect((saved.get('gh-lease') as { by: string }).by).not.toBe('another session')
+  await board($, clock)
+  expect(ghCalls()).toBe(0)
+  await clock.advance(2 * 60_000)
   await board($, clock)
   expect(issueReads()).toBe(1)
   expect(saved.get('gh-lease')).toBeUndefined()
