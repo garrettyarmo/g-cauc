@@ -3,14 +3,16 @@
 #   gcauc-runner up         create or start each repo's VM and build its job image
 #   gcauc-runner serve      keep the slots in runner/repos registered and running jobs (foreground)
 #   gcauc-runner status     each VM, its running job containers, and each repo's g-cauc runners
+#   gcauc-runner logs [N]   the last N lines of serve.log (100 by default)
 #   gcauc-runner rebuild    rebuild the job image in each VM from runner/image/Dockerfile
 #   gcauc-runner install    run `serve` at login and keep it running (launchd, or a systemd user unit)
 #   gcauc-runner uninstall  remove that agent and stop serving
 #   gcauc-runner drain      let running jobs finish and start no new one; serve then exits and the
 #                           agent starts it again with runner/repos (a new repo, a new VM size,
 #                           a removed repo's VM stopped)
-#   gcauc-runner fleet status|drain|update   run status, drain, or a pull of main and a drain, on
-#                           each machine in runner/hosts
+#   gcauc-runner fleet status|logs [N]|drain|update   run status, logs, drain, or a pull of main
+#                           and a drain, on each machine in runner/hosts
+# status and logs only read, so a Claude Code allow rule can run them without a prompt.
 # Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
 # with another project's. Each job runs in a fresh container registered with a one-job
 # (just-in-time) runner config. The config is minted here, with this Mac's gh login, so no
@@ -434,6 +436,12 @@ cmd_drain() {
   log "drain: no slot takes a new job; running jobs finish, then serve exits and the agent starts it again"
 }
 
+cmd_logs() {
+  local n="${1:-100}"
+  case "$n" in '' | *[!0-9]*) echo "usage: gcauc-runner logs [N]" >&2; exit 2 ;; esac
+  tail -n "$n" "$logdir/serve.log"
+}
+
 cmd_status() {
   local l
   load_repos
@@ -527,17 +535,19 @@ cmd_uninstall() {
 # SSH or OpenSSH) for the others. update pulls main and drains, so serve restarts with the new code.
 # fleet goes on to the next machine after a failure, and exits 1 if any machine failed.
 cmd_fleet() {
-  local cmd="${1:-status}" h rc=0
-  case "$cmd" in status | drain | update) ;; *) echo "usage: gcauc-runner fleet status|drain|update" >&2; exit 2 ;; esac
+  local cmd="${1:-status}" n="${2:-}" h rc=0
+  # Only logs takes an argument, and only digits, because the ssh command line holds it.
+  case "$cmd:$n" in status: | drain: | update: | logs: | logs:[0-9]*) ;; *) echo "usage: gcauc-runner fleet status|logs [N]|drain|update" >&2; exit 2 ;; esac
+  case "$n" in *[!0-9]*) echo "usage: gcauc-runner fleet logs [N]" >&2; exit 2 ;; esac
   while IFS= read -r h; do
     echo "== $h"
     # This machine also runs the command in its own process: bash ignores set -e inside a command
     # that || tests, so a failure in a function call here would not stop the command.
     if [ "$h" = "$host" ]; then
-      "$here/gcauc-runner" fleet-one "$cmd" </dev/null || { echo "$h: $cmd failed"; rc=1; }
+      "$here/gcauc-runner" fleet-one "$cmd" $n </dev/null || { echo "$h: $cmd failed"; rc=1; }
     else
       ssh -o BatchMode=yes -o ConnectTimeout=10 "$h" \
-        "PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH \$HOME/code/g-cauc/runner/gcauc-runner fleet-one $cmd" \
+        "PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH \$HOME/code/g-cauc/runner/gcauc-runner fleet-one $cmd $n" \
         </dev/null || { echo "$h: not reachable, or $cmd failed"; rc=1; }
     fi
   done < <(sed 's/#.*//' "$here/hosts" | awk 'NF { print $1 }')
@@ -547,6 +557,7 @@ cmd_fleet() {
 fleet_one() {
   case "$1" in
     status) cmd_status ;;
+    logs) cmd_logs "${2:-}" ;;
     drain) cmd_drain ;;
     update)
       # The pool runs main. A checkout on another branch, or one that cannot fast-forward, stops
@@ -566,11 +577,12 @@ case "${1:-}" in
   up) cmd_up ;;
   serve) cmd_serve ;;
   status) cmd_status ;;
+  logs) cmd_logs "${2:-}" ;;
   rebuild) cmd_rebuild ;;
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
   drain) cmd_drain ;;
-  fleet) cmd_fleet "${2:-status}" ;;
-  fleet-one) fleet_one "${2:-}" ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  fleet) cmd_fleet "${2:-status}" "${3:-}" ;;
+  fleet-one) fleet_one "${2:-}" "${3:-}" ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
