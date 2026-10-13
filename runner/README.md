@@ -44,7 +44,7 @@ During a job, its slot records each container that the job creates. After the jo
 
 Logs: `~/Library/Logs/gcauc-runner/serve.log` (the supervisor) and `<repo>-<slot>.log` (each slot's runner output).
 
-After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`. No slot takes a new job, and the running jobs finish. The drain deletes each idle runner on GitHub, and that runner stops within 1 minute. GitHub refuses to delete a runner that runs a job. Then `serve` exits, and the agent starts it again with the new `runner/repos`. It resizes a VM only when no job runs in it.
+After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`. No slot takes a new job, and the running jobs finish. The drain deletes each idle runner on GitHub, and that runner stops within 1 minute. GitHub refuses to delete a runner that runs a job. Then `serve` exits, and the agent starts it again with the new `runner/repos`. It resizes a VM only when no job runs in it. It stops the VM of a repo that the file no longer names. The drain also deletes the idle runners of a repo that was removed from the file after `serve` started.
 
 A drain takes as long as the longest running job, and no job fails. Do not use `launchctl kickstart -k` while jobs run: it removes every job container. After changing `image/Dockerfile`, run `rebuild`.
 
