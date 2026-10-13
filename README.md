@@ -74,9 +74,9 @@ Build issues:
 4. Closed when the PR merges. Staging deploys from main.
 5. `needs:garrett`: parked with one question and a default. The queue keeps moving.
 
-The foreman never touches an issue that is not `ready`. Nothing is `ready` until its spec was agreed by product and CTO and merged by Garrett.
+The foreman never touches an issue that is not `ready`. Nothing is `ready` until its spec was agreed by product and CTO and merged by Garrett. The one exception is a review follow-up of size S and normal risk: the product pass makes it `ready` with no spec, and the 7am digest lists it (Garrett, 2026-10-12).
 
-Other labels: `spec` (spec PRs), `ci:full` (the foreman adds it when a review round starts, and CI then runs the full suite on the head commit), `from-review` (advisory findings, batched into one hardening spec), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too unless he delegated it, as CallFlow's D23 does), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
+Other labels: `spec` (spec PRs), `ci:full` (the foreman adds it when a review round starts, and CI then runs the full suite on the head commit), `from-review` (advisory findings: a size S, normal-risk one goes to `ready` with no spec, and the rest go into one hardening spec), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too unless he delegated it, as CallFlow's D23 does), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
 
 ## Install
 

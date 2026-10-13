@@ -1,6 +1,6 @@
 # omarchy: Ryzen 7 8700G (8 cores, 16 threads), 30 GiB, x86. Same columns as runner/repos.
-# 2026-10-13: Garrett chose to share omarchy again. myqap keeps 4 slots, so the 4 jobs of a myqap
-# run still start together, with 2 CPUs each. Bison Brain gets 3 slots, because its CI waited up to
+# 2026-10-12: Garrett chose to share omarchy again. myqap keeps 4 slots, so the 4 jobs of a myqap
+# run can start together while omarchy has room, with 2 CPUs each. Bison Brain gets 3 slots, because its CI waited up to
 # 40 min for a Mac slot. The two VMs take 22 GiB and leave 8 GiB for the desktop.
 garrettyarmo/myqap 4 8 10
 # Bison Brain's deploy-staging builds linux/arm64 images, so it pins ARM64 (bisonbrain PR 673).

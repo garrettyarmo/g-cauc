@@ -9,7 +9,7 @@ The foreman's prompt gives you the repo, the issue number, the worktree path, th
 
 ## First round
 
-1. **Read.** AGENTS.md, the issue, the section of the spec it links, and the code in its area.
+1. **Read.** AGENTS.md, the issue, the section of the spec it links, and the code in its area. A `from-review` issue has no spec: its `## Build` section is the spec, and the PR body says `Spec: none, follow-up from #<PR>`.
 2. **Tests first.** Write at least one test per acceptance check the issue covers, in the layer the spec names. Run them: each must fail because the behavior is missing, not because of a typo. Commit them as `test: acceptance checks for #<N> (red)`.
 3. **Build.** Make the smallest change that turns them green, in the repo's existing style.
 4. **Prove it.** Run `scripts/done --fast` until it is green, plus the end-to-end tests for the flows you touched. A red test means the code is wrong. Change a test only when the spec itself is wrong, and say so under "Test changes" in the PR.
