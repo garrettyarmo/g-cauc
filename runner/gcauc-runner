@@ -149,17 +149,21 @@ sweep() {
 # Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
 # registration still listed (even as online, until GitHub notices) has nothing behind it. drain calls
 # it with jobs running: GitHub refuses to delete a runner that runs a job, and an idle runner whose
-# registration is gone exits within a minute.
+# registration is gone exits within a minute. Each deleted runner's name goes to .slots/.deleted,
+# so a slot that cannot read its VM in a drain knows that its runner has no job (await_container).
 prune_stale() {
-  local repo="$1" ids id
-  if ! ids="$(gh api "repos/$repo/actions/runners?per_page=100" --jq \
-    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | .id" 2>/dev/null)"; then
+  local repo="$1" runners id rname
+  if ! runners="$(gh api "repos/$repo/actions/runners?per_page=100" --jq \
+    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | \"\(.id) \(.name)\"" 2>/dev/null)"; then
     log "$repo: could not list runners, so no idle runner was deleted"
     return 0
   fi
-  for id in $ids; do
-    gh api -X DELETE "repos/$repo/actions/runners/$id" >/dev/null 2>&1 || true
-  done
+  while read -r id rname; do
+    [ -n "$id" ] || continue
+    if gh api -X DELETE "repos/$repo/actions/runners/$id" </dev/null >/dev/null 2>&1; then
+      { echo "$rname" >>"$statedir/.deleted"; } 2>/dev/null || true
+    fi
+  done <<<"$runners"
 }
 
 # This machine has room for one more job while its memory is not short and the 1-minute load is
@@ -206,6 +210,47 @@ live_states() {
     if [ -n "$p" ] && [ "$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')" = "$$" ]; then
       printf '%s:%s\n' "${f##*/}" "$s"
     fi
+  done
+}
+
+# Wait until the slot's job container is gone from its VM. The docker run client is a limactl shell
+# session, and a signal can end it while the container runs on (2026-10-13). A sweep then removes
+# the live job's services, and the next docker run fails on the taken name. A stopped container
+# keeps the name too, so the slot removes it. A failed read is no answer, so it reads again. In a
+# drain it stops when no job can run: Lima reports the VM stopped, or GitHub deleted the slot's idle
+# runner. A failed status query is no answer either.
+# The slot keeps its state, and turns busy when the runner takes a job.
+# It uses the caller's repo, n, short, vm, name and busy.
+await_container() {
+  local ctr="gcauc-$short-$n" st said=0
+  while true; do
+    if st="$(in_vm "$vm" docker ps -a --filter "name=^$ctr\$" --format '{{.State}}' </dev/null 2>/dev/null)"; then
+      case "$st" in
+        "") return 0 ;;
+        created | exited | dead)
+          log "$repo slot $n: $ctr stopped in $vm but keeps its name, so this slot removes it"
+          in_vm "$vm" docker rm -f "$ctr" </dev/null >/dev/null 2>&1 || true
+          ;;
+        *)
+          if [ "$said" = 0 ]; then
+            said=1
+            log "$repo slot $n: the client of $name ended, so this slot waits until $ctr stops in $vm"
+          fi
+          if [ "$busy" = 0 ] && in_vm "$vm" docker logs "$ctr" </dev/null 2>&1 | grep 'Running job:' >/dev/null; then
+            busy=1
+            put_state busy
+          fi
+          ;;
+      esac
+    elif [ -e "$drain_file" ] && { [ "$(limactl list "$vm" --format '{{.Status}}' 2>/dev/null)" = Stopped ] ||
+      grep -qxF "$name" "$statedir/.deleted" 2>/dev/null; }; then
+      log "$repo slot $n: draining, and $ctr can run no job (its VM is stopped, or GitHub deleted its idle runner)"
+      return 0
+    elif [ "$said" = 0 ]; then
+      said=1
+      log "$repo slot $n: cannot read $vm, so this slot waits until it can see that $ctr is gone"
+    fi
+    sleep 10
   done
 }
 
@@ -298,6 +343,7 @@ slot() {
       sleep 5
     done
     wait "$cpid" || status=$?
+    await_container
     put_state free
     in_vm "$vm" pkill -f "[e]vents-$short-$n " </dev/null >/dev/null 2>&1 || true
     kill "$epid" 2>/dev/null || true

@@ -48,6 +48,8 @@ After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`.
 
 A drain takes as long as the longest running job, and no job fails. Do not use `launchctl kickstart -k` while jobs run: it removes every job container. After changing `image/Dockerfile`, run `rebuild`.
 
+A slot waits until its job container is gone from the VM, even when its `docker run` client ends first. It removes a container that stopped but keeps its name. In a drain, the slot stops waiting when no job can run: its VM is stopped, or GitHub deleted its idle runner. After changing a slot, run `runner/test-orphan.sh`. It runs `serve` against fake `limactl`, `docker` and `gh`, so it touches no VM and no runner.
+
 The Mac has to be awake and online for CI to run. Jobs queue while it is asleep and GitHub drops a job that waits 24 hours.
 
 ## More machines
