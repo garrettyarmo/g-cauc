@@ -11,7 +11,7 @@ Two or three sentences: the product, who uses it, and the one thing it must neve
 ## Commands
 
 - `scripts/done --fast`: lint, types and the tests for what changed. Paste its summary whenever you claim a pass.
-- `scripts/done --full`: everything, including the full end-to-end suite on a fresh stack. CI runs exactly this.
+- `scripts/done --full`: everything, including the full end-to-end suite on a fresh stack. CI runs it on main, and on a PR when the foreman adds `ci:full`.
 - `scripts/dev up` / `scripts/dev down`: the app and its services for this worktree.
 - `scripts/dev testdb -- CMD`: CMD against a throwaway database.
 - `scripts/deploy staging`: deploy main to staging, then the smoke pass. CI runs it after every merge.
