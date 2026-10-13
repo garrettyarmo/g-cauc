@@ -36,7 +36,7 @@ After CI has run once, so its check names exist:
 gh repo edit <owner>/<repo> --enable-auto-merge --delete-branch-on-merge
 ```
 
-Then a ruleset on main: pull request required, required status checks (the fast CI job names, the commit status that the full run sets, and `agent-review`), block force pushes and deletion, no bypass. No job may have the name of that status: a skipped job counts as passed. GitHub offers a status in the ruleset only after it was set once, so add `ci:full` to the adopt PR first and let its full run finish.
+Then a ruleset on main: pull request required, required status checks (the fast CI job names, the commit status that the full run sets, and `agent-review`), block force pushes and deletion, no bypass. No job may have the name of that status: a skipped job counts as passed. Add `ci:full` to the adopt PR first, and set the rule after its full run has set that status once, so the name in the rule matches.
 
 ## 5. Register
 
