@@ -12,7 +12,7 @@ A lane is one CLI and model that can run work. There is no global limit on jobs:
 | `codex` | OpenAI | ChatGPT Pro ($100) | heavy | 3 | on; its weekly allowance lasted about one day of full use on 2026-10-01 |
 | `gemini` | Google | Cursor Ultra | light | 2 | on, for chores and as a spare reviewing family |
 | `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: Garrett has only the small X subscription; Grok runs through Cursor instead |
-| `muse` | Meta | Muse Code Max ($200) | light | 4 | on since 2026-10-12, with contributor mode off; its limits are not measured yet; its sandbox blocks Docker (see its launch command) |
+| `muse` | Meta | Muse Code Max ($200) | light | 4 | on since 2026-10-12, with contributor mode off; its limits are not measured yet; its sandbox blocks Docker, except on myqap (see its launch command) |
 
 Weight is how hard a job in that lane draws on its subscription. Light lanes are where the volume goes. If the Mac itself bogs down (each build can boot a full local stack), lower the light lanes' Max jobs first.
 
@@ -48,7 +48,7 @@ cd <worktree> && nohup cursor-agent -p --output-format stream-json --model <mode
 nohup muse exec --json --model muse-wonder-1.0 --contributor-mode off --approval-mode never --user-input-auto-resolve --workspace <worktree> "<prompt> You may commit, push this branch and open or update its PR." < /dev/null > <log> 2>&1 &
 ```
 
-Its sandbox blocks the Docker socket, so a Muse job cannot start a local database or `scripts/dev up`. It runs the gates that need no database and leaves the rest to CI (see the `build` skill). Do not turn its sandbox off to get Docker: that is Garrett's decision. Model ids: `muse-wonder-1.0` (the default) and `muse-spark-1.3`.
+Its sandbox blocks the Docker socket, so a Muse job cannot start a local database or `scripts/dev up`. It runs the gates that need no database and leaves the rest to CI (see the `build` skill). The one exception is myqap. On 2026-10-12, Garrett approved `--disable-sandbox` for myqap Muse jobs, so they can use Docker and PostGIS. For a myqap job, add `--disable-sandbox` after `--user-input-auto-resolve`. With the sandbox off, Muse can read every file on the Mac. Do not turn the sandbox off for another project without Garrett's decision. Model ids: `muse-wonder-1.0` (the default) and `muse-spark-1.3`.
 
 ## Telling when a lane is out
 
