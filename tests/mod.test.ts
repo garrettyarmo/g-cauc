@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, calls: [] as string[] }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, duringGh: null as null | (() => void), calls: [] as string[] }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -81,6 +81,11 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
   on('process.run', ($, e) => {
     const a = e.argv.join(' ')
     world.calls.push(a)
+    if (a.startsWith('gh') && world.duringGh) {
+      const during = world.duringGh
+      world.duringGh = null
+      during()
+    }
     if (a.startsWith('gh') && world.rateLimited) return { value: { exitCode: 1, stdout: '', stderr: 'GraphQL: API rate limit already exceeded for user ID 1.' } }
     if (a.startsWith('gh') && world.ghFails) return { value: { exitCode: 1, stdout: '', stderr: 'HTTP 502' } }
     if (a.startsWith('gh issue list')) return { value: { exitCode: 0, stdout: ISSUES, stderr: '' } }
@@ -517,8 +522,41 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
     await board($, clock)
     expect(issueReads()).toBe(2)
     expect(saved.get('gh-pause')).toBeDefined()
+    // The expired stop is deleted
+    expect([...saved.keys()].filter((k) => k.startsWith('gh-pause-'))).toEqual([])
   } finally {
     world.rateLimited = false
+  }
+})
+
+test('a session that hits a rate limit never shortens a later stop that another session saved', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  world.rateLimited = true
+  try {
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    // While this session reads, another session hits a rate limit later and saves a stop that ends later
+    world.duringGh = () => {
+      const until = clock.now() + 11 * 60_000
+      saved.set('gh-pause-' + until, { until })
+      saved.set('gh-pause', { until })
+    }
+    await board($, clock)
+    expect(issueReads()).toBe(1)
+    world.rateLimited = false
+    // This session's own stop ends after 10 minutes, and the later stop still holds
+    await clock.advance(10 * 60_000 + 1000)
+    await board($, clock)
+    expect(issueReads()).toBe(1)
+    await clock.advance(60_000)
+    await board($, clock)
+    expect(issueReads()).toBe(2)
+  } finally {
+    world.rateLimited = false
+    world.duringGh = null
   }
 })
 

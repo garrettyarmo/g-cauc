@@ -193,6 +193,21 @@ async function readText($, path) {
   }
 }
 
+// Two sessions can hit a rate limit at once, and $.store has no atomic write.
+// So each stop has its own key, named by its end, and no session rewrites it.
+// A slow session cannot shorten a later stop. An expired key never changes, so any session may delete it.
+async function readPause($, now) {
+  let until = 0
+  for (const k of await $.store.keys()) {
+    if (!k.startsWith('gh-pause')) continue
+    const pause = await $.store.get(k)
+    const end = Number(pause && pause.until) || 0
+    if (end > now) until = Math.max(until, end)
+    else if (k.startsWith('gh-pause-')) await $.store.delete(k)
+  }
+  return until
+}
+
 async function refresh($, gh) {
   if (busy) {
     again = Math.max(again, gh)
@@ -202,8 +217,7 @@ async function refresh($, gh) {
   let cached = null
   try {
     const now = await $.clock.now()
-    const pause = await $.store.get('gh-pause')
-    pausedUntil = pause && now < pause.until ? pause.until : 0
+    pausedUntil = await readPause($, now)
     cached = await $.store.get('snapshot')
     const ciCached = await $.store.get(CI_SNAPSHOT)
     lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
@@ -217,7 +231,10 @@ async function refresh($, gh) {
       ci = await gatherCi($, ciCached, now)
       await $.store.set(CI_SNAPSHOT, ci)
       if (rateLimited) {
-        pausedUntil = now + PAUSE_MS
+        // The stop runs from the rate-limit answer, not from the start of the refresh
+        pausedUntil = (await $.clock.now()) + PAUSE_MS
+        await $.store.set('gh-pause-' + pausedUntil, { until: pausedUntil })
+        // An older board reads only gh-pause
         await $.store.set('gh-pause', { until: pausedUntil })
       }
       refreshedAt = now
