@@ -16,7 +16,7 @@ gcauc-runner serve                        one fresh container per job, from gcau
 
 - `runner/lima.yaml`: the template for each repo's VM. Ubuntu 24.04 (the same release as `ubuntu-latest` until GitHub moves it), Docker from Ubuntu's packages. No host mounts, no port forwarding to the Mac, no SSH agent forwarding.
 - `runner/image/Dockerfile`: GitHub's own runner image, pinned, plus `psql` and a checksum-pinned `docker compose`.
-- `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `rebuild`, `install`, `uninstall`).
+- `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `logs`, `rebuild`, `install`, `uninstall`).
 - `runner/repos`: the repositories that the pool serves. Each line gives the slots (the most jobs at the same time), the CPUs and the memory of that repo's VM. The VMs share the Mac's CPUs, so a quiet VM uses almost no CPU. Each VM keeps its memory, so the total memory must leave room for the Mac.
 
 Slots are a ceiling, not a reservation. Each repo keeps one registered runner that waits for its next job. When that runner takes a job, the next slot registers a new runner, but only while the Mac has room: macOS reports normal memory pressure, and the 1-minute load is less than the number of cores. A repo that has no job in progress always gets a runner. The free slots of a repo take this turn in slot order. Each state file names its slot's process, so the file of a slot that stopped does not count. Thus CI uses all of a free Mac, and it starts fewer jobs while Garrett's own work needs the CPU or the memory. A job that cannot start yet waits in GitHub's queue. The serve log tells when a slot waits for the Mac.
@@ -40,9 +40,19 @@ During a job, its slot records each container that the job creates. After the jo
 ~/code/g-cauc/runner/gcauc-runner up        # create or start each repo's VM and build its image
 ~/code/g-cauc/runner/gcauc-runner install   # serve at login, restarted if it dies
 ~/code/g-cauc/runner/gcauc-runner status    # each VM, its running jobs, each repo's runners
+~/code/g-cauc/runner/gcauc-runner logs 50   # the last 50 lines of serve.log (100 by default)
 ```
 
 Logs: `~/Library/Logs/gcauc-runner/serve.log` (the supervisor) and `<repo>-<slot>.log` (each slot's runner output).
+
+`status`, `logs`, `fleet status` and `fleet logs` only read. A `logs` argument must be digits, so no other command can ride on it. These allow rules in `~/.claude/settings.json` let a Claude Code session run them without a prompt, also in auto mode:
+
+```json
+"Bash(/Users/garrett/code/g-cauc/runner/gcauc-runner status)",
+"Bash(/Users/garrett/code/g-cauc/runner/gcauc-runner logs:*)",
+"Bash(/Users/garrett/code/g-cauc/runner/gcauc-runner fleet status)",
+"Bash(/Users/garrett/code/g-cauc/runner/gcauc-runner fleet logs:*)"
+```
 
 After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`. No slot takes a new job, and the running jobs finish. The drain deletes each idle runner on GitHub, and that runner stops within 1 minute. GitHub refuses to delete a runner that runs a job. Then `serve` exits, and the agent starts it again with the new `runner/repos`. It resizes a VM only when no job runs in it. It stops the VM of a repo that the file no longer names. The drain also deletes the idle runners of a repo that was removed from the file after `serve` started.
 
@@ -65,7 +75,7 @@ To add a Linux box:
 5. Run `runner/gcauc-runner up`, then `runner/gcauc-runner install`.
 6. Add the machine's tailnet name to `runner/hosts`. If its user name differs from this machine's, add `Host <name>` with `User <user>` to `~/.ssh/config` on each machine that runs fleet.
 
-Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet update` pulls main and drains each one. A checkout that is not on main stops before the drain. fleet goes on to the next machine after a failure, and exits 1 if any machine failed. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
+Then `gcauc-runner fleet status` shows each machine, and `gcauc-runner fleet logs` shows the end of each machine's serve log. `gcauc-runner fleet update` pulls main and drains each one. A checkout that is not on main stops before the drain. fleet goes on to the next machine after a failure, and exits 1 if any machine failed. The other machines must accept SSH from this one (Tailscale SSH or OpenSSH).
 
 The Mac's VMs are ARM, and most Linux boxes are x86, so a job can run on either type. To pin a job to one type, add the label `ARM64` or `X64` to its `runs-on`. The time limits in some tests were measured on the Mac, so check them on the other machine.
 
