@@ -117,6 +117,13 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
 
 const BAND = { plugin: 'g-cauc', component: 'AbovePrompt', requestId: 'band', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 120, scroll: { offset: 0, bodyRows: 4 }, view: {} } } as const
 
+// A GitHub read waits CLAIM_MS (1 s) after it claims the lease, so a test moves the clock past it.
+const CLAIM = 1000
+async function board($, clock, args = 'refresh') {
+  await $.command.run({ command: 'board', args })
+  await clock.advance(CLAIM)
+}
+
 test('the board shows the phase, the running review, the queue and what needs Garrett', async ($, on) => {
   const saved = new Map<string, unknown>()
   const toasts: string[] = []
@@ -124,8 +131,7 @@ test('the board shows the phase, the running review, the queue and what needs Ga
   stubWorld(on, saved, toasts)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   await ui.press({ key: 'tab-p-callflow' })
@@ -153,7 +159,7 @@ test('the Desktop app draws badges, rings, pipelines, bars, pills, cells and dot
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   for (const t of ['all', 'p-callflow', 'fleet']) {
     await ui.press({ key: 'tab-' + t })
@@ -168,7 +174,7 @@ test('the board also draws in the terminal', async ($, on) => {
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   await ui.unmount()
@@ -180,7 +186,7 @@ test('the project page shows its pool, running and stuck jobs, results, timings,
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /1 busy · 1 idle · 1 offline/ })).toBeDefined()
@@ -219,24 +225,24 @@ test('a failed gh call keeps the last good board and does not repeat alerts', as
   world.ghFails = false
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   world.ghFails = true
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /gh could not read garrettyarmo\/callflow/ })).toBeDefined()
   // A second failure in a row still shows the last good board
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   // An unreadable projects.md changes nothing either
   world.ghFails = false
   world.projectsGone = true
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   world.projectsGone = false
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(toasts.filter((t) => t.includes('needs you')).length).toBe(0)
   await ui.unmount()
 })
@@ -250,7 +256,7 @@ test('a CI snapshot an older board saved is never read back', async ($, on) => {
   world.ghFails = true
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /gh could not read the Actions runs/ })).toBeDefined()
@@ -283,7 +289,7 @@ test('a cold start shows the last snapshot any session saved, and a refresh that
   expect(await ui.find({ type: 'Text', text: /out until/ })).toBeDefined()
   await ui.unmount()
   world.projectsGone = true
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await after.press({ key: 'tab-all' })
   expect(await after.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
@@ -363,10 +369,10 @@ test('a job log GitHub has not finished uploading is read again on a later refre
   world.logCalls = 0
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   const k = 'ci-run\u0000garrettyarmo/callflow\u0000403'
   expect((saved.get(k) as { retry?: boolean; fast: unknown }).retry).toBe(true)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect((saved.get(k) as { fast: { seconds: number } }).fast.seconds).toBe(127)
   world.logFailsOnce = false
 })
@@ -378,7 +384,7 @@ test('a control character in a PR title is dropped, and the project page still d
   world.nastyTitle = true
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'tab-p-callflow' })
@@ -397,7 +403,7 @@ test('each project is drawn in its own color from projects.md, and a project wit
     stubWorld(on, saved, [])
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
     await clock.advance(2000)
-    await $.command.run({ command: 'board', args: 'refresh' })
+    await board($, clock)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
     // The All page: one card per project, each with a badge in its color (Bison Brain has none, so the second fallback).
     // No borders, percent widths or wrapping: the Desktop app showed no pane after 0.6.0 added them (2026-10-05).
@@ -442,8 +448,7 @@ test('the board reads GitHub only when /board opens on an old snapshot or on Ref
   await clock.advance(2000)
   expect(ghCalls()).toBe(0)
   // Opening the board reads GitHub once: one open-PR read per project, which the CI read reuses
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   expect(issueReads()).toBe(1)
   expect(world.calls.filter((c) => c.startsWith('gh pr list') && c.includes('--state open')).length).toBe(1)
   // An open pane does not poll: the ticks read local data only
@@ -455,19 +460,17 @@ test('the board reads GitHub only when /board opens on an old snapshot or on Ref
   expect(await band.find({ type: 'Text', text: /\/board · \d+m ago/ })).toBeDefined()
   await band.unmount()
   // Opening the board on a snapshot older than 2 minutes reads again, on a newer one it does not
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   expect(issueReads()).toBe(2)
   await clock.advance(60_000)
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   expect(issueReads()).toBe(2)
   // The Refresh button reads at once
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(issueReads()).toBe(3)
 })
 
-test('while another session reads GitHub, this one shows the shared snapshot and reads nothing', async ($, on) => {
+test('while another session reads GitHub, this one shows the shared snapshot and reads nothing, even on Refresh', async ($, on) => {
   const saved = new Map<string, unknown>()
   const old = Date.now() - 10 * 60_000
   saved.set('snapshot', { at: old, lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
@@ -478,16 +481,42 @@ test('while another session reads GitHub, this one shows the shared snapshot and
   world.calls = []
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   expect(ghCalls()).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
+  // Refresh skips the age check, not the lease: the command and the button read nothing and keep the lease
+  await board($, clock)
+  await ui.press({ key: 'refresh' })
+  await clock.advance(CLAIM)
+  expect(ghCalls()).toBe(0)
+  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: 'another session' })
   await ui.unmount()
   // A lease older than 2 minutes is dead: its session stopped, so this one reads
   await clock.advance(2 * 60_000)
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
+  expect(issueReads()).toBe(1)
+  expect(saved.get('gh-lease')).toBeUndefined()
+})
+
+test('when two sessions claim a free lease at once, only the last claim reads GitHub', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+  await clock.advance(2000)
+  // This session claims the lease and waits. Another session's claim lands during the wait.
+  await $.command.run({ command: 'board', args: 'refresh' })
+  await clock.advance(CLAIM / 2)
+  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: expect.any(String) })
+  saved.set('gh-lease', { at: clock.now(), by: 'another session' })
+  await clock.advance(CLAIM)
+  expect(ghCalls()).toBe(0)
+  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: 'another session' })
+  // With no other claim, the next Refresh reads and then frees the lease
+  saved.delete('gh-lease')
+  await board($, clock)
   expect(issueReads()).toBe(1)
   expect(saved.get('gh-lease')).toBeUndefined()
 })
@@ -501,10 +530,10 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
   try {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
     await clock.advance(2000)
-    await $.command.run({ command: 'board', args: 'refresh' })
+    await board($, clock)
     expect(issueReads()).toBe(1)
     expect((saved.get('gh-pause') as { until: number }).until).toBeGreaterThan(Date.now() + 9 * 60_000)
-    await $.command.run({ command: 'board', args: 'refresh' })
+    await board($, clock)
     await clock.advance(5 * 60_000)
     expect(issueReads()).toBe(1)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -512,7 +541,7 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
     await ui.unmount()
     world.rateLimited = false
     await clock.advance(6 * 60_000)
-    await $.command.run({ command: 'board', args: 'refresh' })
+    await board($, clock)
     expect(issueReads()).toBe(2)
     expect(saved.get('gh-pause')).toBeDefined()
   } finally {

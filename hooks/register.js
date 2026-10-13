@@ -1,7 +1,7 @@
 // g-cauc mod: the /board pane, the quiet line above the prompt, and the
-// permission advisor. It reads the process list and job logs on a timer, and
-// GitHub only on demand; it holds no state of record (GitHub and git do), only
-// a shared cache in $.store so several open sessions make one set of gh calls.
+// permission advisor. It reads the process list and job logs on a timer. It
+// reads GitHub only on demand. It holds no state of record (GitHub and git do).
+// It keeps a shared cache in $.store, so several open sessions make one set of gh calls.
 
 import {
   parseProjects, parseLanes, summarizeProject, parseJobs, laneOf, modelName, parseEtime,
@@ -12,15 +12,16 @@ import { parseRuns, parseRunJobs, parseRunners, parseRepoSlots, doneTimings, bud
 import { colored, progress, pill, cells, dots, budgetTone, badge, ring, pipeline, projectColor } from './draw.js'
 
 const PANE = 'g-cauc-board'
-// GitHub budget. Every Claude Code session on the Mac runs this module, and
-// all of them share one GraphQL limit (5,000 an hour, across Garrett's tokens),
-// so the board reads GitHub only on demand: when /board opens and the shared
-// snapshot is old, and on /board refresh or the Refresh button. One session
-// reads GitHub at a time (the lease), and every session stops for a while after
-// GitHub says "rate limit". The timers read local data (jobs, logs, lanes) and
-// pick up the snapshot any session saved.
+// GitHub budget. Every Claude Code session on the Mac runs this module.
+// All of them share one GraphQL limit (5,000 an hour, across Garrett's tokens).
+// So the board reads GitHub only on demand: when /board opens on an old shared
+// snapshot, and on /board refresh or the Refresh button. One session reads
+// GitHub at a time (the lease). Every session stops for a while after GitHub
+// says "rate limit". The timers read local data (jobs, logs, lanes) and pick up
+// the snapshot any session saved.
 const FRESH_MS = 2 * 60_000 // opening /board reads GitHub when the snapshot is older than this
 const LEASE_MS = 2 * 60_000 // how long one session may hold the GitHub read
+const CLAIM_MS = 1000 // the wait between a claim of the lease and its check
 const PAUSE_MS = 10 * 60_000 // the stop after a rate limit
 const ME = Math.random().toString(36).slice(2)
 // The CI snapshot's store key names its shape, so a session never reads a
@@ -81,8 +82,8 @@ export function register(on, options) {
 
   on('command.run', { command: 'board' }, async ($, e) => {
     if (String(e.args || '').trim() === 'refresh') {
-      await refresh($, NOW)
-      return { text: 'g-cauc: refreshed' }
+      refresh($, NOW)
+      return { text: 'g-cauc: refreshing' }
     }
     paneOpen = true
     await $.ui.open({ id: PANE, title: 'g-cauc', focus: true, closeOnEscape: true })
@@ -210,16 +211,23 @@ async function refresh($, gh) {
     cached = await $.store.get('snapshot')
     const ciCached = await $.store.get(CI_SNAPSHOT)
     lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
-    // Refresh skips the age check and the lease, never the pause.
+    // Refresh skips the age check. It never skips the lease or the pause.
     const old = !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= FRESH_MS
     let due = !pausedUntil && (gh === NOW || (gh === IF_OLD && old))
-    if (due && gh !== NOW) {
+    if (due) {
       const lease = await $.store.get('gh-lease')
       if (lease && lease.by !== ME && now - lease.at < LEASE_MS) due = false
     }
     if (due) {
-      holding = true
+      // $.store has no atomic write, so two sessions can both find the lease free.
+      // Each one claims it, waits, and reads it again. Only the last claim reads GitHub (Fischer's lock).
       await $.store.set('gh-lease', { at: now, by: ME })
+      await $.clock.sleep(CLAIM_MS)
+      const lease = await $.store.get('gh-lease')
+      due = Boolean(lease && lease.by === ME)
+    }
+    if (due) {
+      holding = true
       rateLimited = false
       openPrsByRepo.clear()
       projects = await gatherProjects($, cached)
@@ -258,7 +266,8 @@ async function refresh($, gh) {
   } finally {
     if (holding) {
       try {
-        await $.store.delete('gh-lease')
+        const lease = await $.store.get('gh-lease')
+        if (lease && lease.by === ME) await $.store.delete('gh-lease')
       } catch {
         // the lease expires by itself
       }
@@ -456,7 +465,7 @@ async function gatherCi($, cached, now) {
   return { at: now, projects: out, billing: await billing($, cached) }
 }
 
-// Actions minutes this month, when the gh token has the user scope; read at most every 10 minutes, on a GitHub read.
+// Actions minutes this month, when the gh token has the user scope. A GitHub read reads them at most every 10 minutes.
 async function billing($, cached) {
   if (Date.now() - billingAt < 10 * 60_000) return (cached && cached.billing) || ci.billing
   billingAt = Date.now()
