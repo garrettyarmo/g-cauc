@@ -25,6 +25,32 @@ containerd:
   system: false
   user: false
 provision:
+# One time source: the host's clock. Lima's guest agent steps the guest clock to the host's clock when
+# they differ by more than 100 ms, and Lima has no setting to turn that off. systemd-timesyncd steered
+# the same clock to ntp.ubuntu.com, so the two fought: over 300 steps back per VM on 2026-10-12, which
+# failed CallFlow tests that order events by wall clock. Mask timesyncd, then clear the frequency and the
+# offset that it left in the kernel (they outlive it), as at boot. Lima runs this at every boot.
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    systemctl mask --now systemd-timesyncd
+    python3 - <<'PY'
+    import ctypes
+    class Timex(ctypes.Structure):  # struct timex: the fields used here, then room for the rest
+        _fields_ = [("modes", ctypes.c_uint), ("offset", ctypes.c_long), ("freq", ctypes.c_long),
+                    ("maxerror", ctypes.c_long), ("esterror", ctypes.c_long), ("status", ctypes.c_int),
+                    ("rest", ctypes.c_byte * 200)]
+    libc = ctypes.CDLL(None, use_errno=True)
+    ADJ_OFFSET, ADJ_FREQUENCY, ADJ_MAXERROR, ADJ_ESTERROR, ADJ_STATUS, STA_UNSYNC = 0x1, 0x2, 0x4, 0x8, 0x10, 0x40
+    # The offset first: the kernel takes it only while its PLL is on, and the second call turns the PLL off.
+    # timedatectl reports "synchronized" while the error bound is under its limit of 16 s, so set the limit (µs).
+    reset = Timex(modes=ADJ_STATUS | ADJ_FREQUENCY | ADJ_MAXERROR | ADJ_ESTERROR, status=STA_UNSYNC,
+                  maxerror=16000000, esterror=16000000)
+    for t in (Timex(modes=ADJ_OFFSET), reset):
+        if libc.adjtimex(ctypes.byref(t)) < 0:
+            raise OSError(ctypes.get_errno(), "adjtimex")
+    PY
 - mode: system
   script: |
     #!/bin/bash
