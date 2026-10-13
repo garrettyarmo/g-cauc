@@ -40,8 +40,8 @@ The kit never assumes a language or framework. It only calls these entry points 
 
 | Entry point | What it must do |
 |---|---|
-| `scripts/done --fast` | Lint, type check and the tests for what changed, fast enough to run many times per build. Exit 0 means green. |
-| `scripts/done --full` | Everything, including the full end-to-end suite on a fresh stack. CI runs exactly this. |
+| `scripts/done --fast` | Lint, type check and the tests for what changed, fast enough to run many times per build. Exit 0 means green. CI runs it on every push to a PR. |
+| `scripts/done --full` | Everything, including the full end-to-end suite on a fresh stack. CI runs it once in each review round of a PR, and on every push to main. |
 | `scripts/dev up` / `down` | Boots the app and its services for one worktree, on ports that do not collide with another worktree. |
 | `scripts/dev testdb -- CMD` | Runs CMD against a throwaway database that is never the dev database. |
 | `scripts/deploy staging` | Deploys main to staging, then runs the smoke end-to-end pass against it. |
@@ -49,6 +49,8 @@ The kit never assumes a language or framework. It only calls these entry points 
 | `CLAUDE.md` | `@AGENTS.md` plus any Claude-only lines. |
 | GitHub | Branch protection on main (PR only, CI and `agent-review` required, no bypass), auto-merge allowed, the label set, Issues on. |
 | CI | Every workflow job that runs project code uses `runs-on: [self-hosted, gcauc]`, the runner pool in `runner/`, not GitHub's hosted runners (hosted minutes ran out on CallFlow on 2026-10-04). |
+
+**Fast on every push, full once in each review round.** A push to a PR runs `scripts/done --fast`, plus any quick job the project adds for the changed code. The full suite runs on a PR only when the `ci:full` label is added, and on every push to main. The foreman adds `ci:full` when it starts each review, so the full suite runs on the head commit beside the review. A later push does not run it again: the next review round adds the label again. The full run sets a commit status, and branch protection requires that status. The status is the merge gate, not the job, because GitHub counts a skipped job as a passed required check. Garrett asked for this on 2026-10-12. In the week before, Bison Brain ran the full suite 2.6 times for each merged PR, and CallFlow 3.3 times.
 
 Which test tools sit behind `scripts/done` is the project's choice and is written in its `Test layers` table: pytest, Vitest, Jest, Playwright, simulated phone calls, data checks. Every acceptance check in a spec names its layer and the command that proves it.
 
@@ -74,7 +76,7 @@ Build issues:
 
 The foreman never touches an issue that is not `ready`. Nothing is `ready` until its spec was agreed by product and CTO and merged by Garrett.
 
-Other labels: `spec` (spec PRs), `from-review` (advisory findings, batched into one hardening spec), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too unless he delegated it, as CallFlow's D23 does), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
+Other labels: `spec` (spec PRs), `ci:full` (the foreman adds it when a review round starts, and CI then runs the full suite on the head commit), `from-review` (advisory findings, batched into one hardening spec), `risk:high` (data, auth, money, migrations, deploy: Garrett merges the build PR too unless he delegated it, as CallFlow's D23 does), `size:s`, `size:m`, `size:l`, `lane:<name>`, `area:<name>` (per project, so work in different areas runs in parallel).
 
 ## Install
 
