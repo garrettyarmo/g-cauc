@@ -7,7 +7,8 @@
 #   gcauc-runner install    run `serve` at login and keep it running (launchd, or a systemd user unit)
 #   gcauc-runner uninstall  remove that agent and stop serving
 #   gcauc-runner drain      let running jobs finish and start no new one; serve then exits and the
-#                           agent starts it again with runner/repos (a new repo, a new VM size)
+#                           agent starts it again with runner/repos (a new repo, a new VM size,
+#                           a removed repo's VM stopped)
 #   gcauc-runner fleet status|drain|update   run status, drain, or a pull of main and a drain, on
 #                           each machine in runner/hosts
 # Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
@@ -317,11 +318,34 @@ clear_vms() {
   done
 }
 
+# Stop each g-cauc VM whose repo runner/repos no longer names, so its memory goes back to this
+# machine before cmd_up sizes the others. serve calls it at its start, when no job runs.
+stop_unlisted() {
+  local l want=" " v
+  for l in ${lines[@]+"${lines[@]}"}; do
+    parse "$l"
+    want="$want$vm "
+  done
+  for v in $(limactl list -q 2>/dev/null | grep '^gcauc-'); do
+    case "$want" in *" $v "*) continue ;; esac
+    if [ "$(limactl list "$v" --format '{{.Status}}')" = Running ]; then
+      log "$v: its repo is not in $repos_file, so it stops"
+      limactl stop "$v" </dev/null >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 cmd_serve() {
   mkdir -p "$logdir"
   rm -f "$drain_file"
   rm -rf "$statedir"
+  load_repos
+  stop_unlisted
   cmd_up
+  # drain reads this list too: a pull can change runner/repos while serve runs (fleet update pulls
+  # before it drains), and a repo removed from the file still has a runner that waits for a job.
+  mkdir -p "$statedir"
+  printf '%s\n' ${lines[@]+"${lines[@]}"} >"$statedir/.repos"
   local l gid ncpu per windows n pids=()
   for l in ${lines[@]+"${lines[@]}"}; do
     parse "$l"
@@ -354,12 +378,12 @@ cmd_serve() {
 # Start no new job, and delete each idle runner on GitHub (it waits for a job that must not come).
 # Busy slots finish their jobs and stop; then serve exits and the launchd agent starts it again.
 cmd_drain() {
-  local l
+  local r
   load_repos
   touch "$drain_file"
-  for l in ${lines[@]+"${lines[@]}"}; do
-    parse "$l"
-    prune_stale "$repo"
+  # The repos in runner/repos and the repos that serve read at its start.
+  for r in $({ printf '%s\n' ${lines[@]+"${lines[@]}"}; cat "$statedir/.repos" 2>/dev/null; } | awk 'NF { print $1 }' | sort -u); do
+    prune_stale "$r"
   done
   log "drain: no slot takes a new job; running jobs finish, then serve exits and the agent starts it again"
 }

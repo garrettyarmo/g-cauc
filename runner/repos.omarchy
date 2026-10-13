@@ -1,6 +1,7 @@
 # omarchy: Ryzen 7 8700G (8 cores, 16 threads), 30 GiB, x86. Same columns as runner/repos.
-# 2026-10-12: Garrett gave myqap priority, so omarchy serves myqap alone. Its 4 slots start the
-# 4 jobs of a myqap run (demo, warehouse, engine, web) together, with 3 CPUs each, and its 16 GiB
-# leave 14 GiB for the desktop. Bison Brain runs on the Mac only. To serve it here again, add
-# "garrettyarmo/bisonbrain 3 10 12" and lower myqap so that the VMs leave the desktop 8 GiB.
+# 2026-10-12: Garrett gave myqap priority, so omarchy serves myqap alone. Its 4 slots can run the
+# 4 jobs of a myqap run (demo, warehouse, engine, web) together while omarchy has room, with 3 CPUs
+# each. Its 16 GiB leave 14 GiB for the desktop once serve stops the Bison Brain VM. Bison Brain
+# runs on the Mac only. To serve it here again, add "garrettyarmo/bisonbrain 3 10 12" and lower
+# myqap so that the VMs leave the desktop 8 GiB.
 garrettyarmo/myqap 4 12 16
