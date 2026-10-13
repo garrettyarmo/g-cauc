@@ -36,12 +36,12 @@ If it holds, post the product sign-off (format in the `spec` skill) and label th
 
 Ideas labeled `from-review` are advisory findings filed by reviewers. Do not write one spec each. A small one goes straight to the build queue (Garrett, 2026-10-12: Bison Brain and CallFlow had 1 ready issue each, while 32 follow-ups waited for a hardening spec). Take at most five per project per pass, oldest first. For each:
 
-1. Read the finding, the PR it came from and the code it names. If it is already fixed or a duplicate, close it with a comment that names the fix or the other issue.
+1. Read the finding, its PR and the code it names. Close it if it is already fixed or a duplicate. In the comment, name the fix or the other issue.
 2. Decide its size and risk. It is `risk:high` when it touches data, auth, money, migrations or deploy.
-3. If it is size S, not `risk:high`, and one command can prove the fix, make it a build issue with no spec. Add a `## Build` section to its body: the PR it came from, one acceptance check with its test layer and the command that proves it, and the files it touches. Remove `idea`. Add `ready`, `size:s`, `area:<name>` and a `lane:*` label by `~/code/g-cauc/routing.md`. Keep `from-review`. Comment: "Ready with no spec: size S, normal risk."
-4. Otherwise it waits for the hardening spec. Once a week per project, or when ten of these are open, fold them into a single hardening spec, and link each from the spec.
+3. A follow-up is small when it is size S, it is not `risk:high`, and one command can prove the fix. Make a small follow-up a build issue with no spec. Add a `## Build` section to its body. Put in it the source PR, one acceptance check with its test layer and command, and the files it touches. Remove `idea`. Add `ready`, `size:s`, `area:<name>` and a `lane:*` label from `~/code/g-cauc/routing.md`. Keep `from-review`. Comment: "Ready with no spec: size S, normal risk."
+4. A follow-up that is not small waits for the hardening spec. Write that spec once a week per project, or when ten follow-ups wait. Fold them all into it, and link each one from the spec.
 
-Ideas are open issues labeled `idea`, plus issues Garrett opened with no lifecycle label (`idea`, `proposed`, `agreed`, `ready`, `building`, `in-review`, `needs:garrett`) that are not build issues. Take at most three per project per pass, oldest first.
+Ideas are open issues labeled `idea`, plus issues Garrett opened with no lifecycle label (`idea`, `proposed`, `agreed`, `ready`, `building`, `in-review`, `needs:garrett`) that are not build issues. A `from-review` issue is never an idea for this step, because the follow-up rule above handles it. Take at most three per project per pass, oldest first.
 
 For each:
 
