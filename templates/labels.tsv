@@ -16,4 +16,4 @@ lane:composer	fef2c0	Prefer the Composer 2.5 lane (Cursor).
 lane:gemini	bfdadc	Prefer the Gemini lane (Cursor).
 lane:grok	e4e669	Prefer the Grok 4.7 lane (Cursor).
 ci:full	bfe5bf	The foreman started a review round. CI runs the full suite on the head commit.
-from-review	c5def5	An advisory finding from a review. The product pass batches these into one hardening spec.
+from-review	c5def5	A review's advisory finding. Small, normal-risk ones become ready. Others join a hardening spec.
