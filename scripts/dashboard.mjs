@@ -6,7 +6,7 @@
 // colors (hooks/lib.js, hooks/draw.js) do the parsing and the colors.
 //
 //   node scripts/dashboard.mjs            write the page once
-//   node scripts/dashboard.mjs install    write it every 5 minutes (launchd agent)
+//   node scripts/dashboard.mjs install    write it every 10 minutes (launchd agent)
 //   node scripts/dashboard.mjs uninstall  stop the agent
 //
 // The page: ~/code/g-cauc/dashboard/index.html. It reloads itself every minute.
@@ -292,7 +292,7 @@ function install() {
   <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key><array><string>${process.execPath}</string><string>${fileURLToPath(import.meta.url)}</string></array>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${home}/.local/bin</string></dict>
-  <key>StartInterval</key><integer>300</integer>
+  <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>${logs}</string>
   <key>StandardErrorPath</key><string>${logs}</string>

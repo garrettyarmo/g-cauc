@@ -19,7 +19,7 @@ const PANE = 'g-cauc-board'
 // for a while after GitHub says "rate limit". Local data (jobs, logs, lanes)
 // still updates on every tick.
 const GH_OPEN_MS = 2 * 60_000 // a /board pane is open in some session
-const GH_QUIET_MS = 5 * 60_000 // nobody is looking: only the quiet line reads it
+const GH_QUIET_MS = 10 * 60_000 // nobody is looking: only the quiet line reads it
 const VIEWER_MS = 3 * 60_000 // a pane counts as open this long after its last tick
 const LEASE_MS = 2 * 60_000 // how long one session may hold the GitHub read
 const PAUSE_MS = 10 * 60_000 // the stop after a rate limit

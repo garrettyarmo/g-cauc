@@ -416,7 +416,7 @@ test('each project is drawn in its own color from projects.md, and a project wit
 
 const issueReads = () => world.calls.filter((c) => c.startsWith('gh issue list')).length
 
-test('the board reads GitHub every 5 minutes when no pane is open, every 2 minutes when one is, and once per refresh for open PRs', async ($, on) => {
+test('the board reads GitHub every 10 minutes when no pane is open, every 2 minutes when one is, and once per refresh for open PRs', async ($, on) => {
   const saved = new Map<string, unknown>()
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
@@ -426,8 +426,8 @@ test('the board reads GitHub every 5 minutes when no pane is open, every 2 minut
   expect(issueReads()).toBe(1)
   // One open-PR read per project: the CI read reuses it
   expect(world.calls.filter((c) => c.startsWith('gh pr list') && c.includes('--state open')).length).toBe(1)
-  // Ticks every minute read local data only, until 5 minutes have passed
-  await clock.advance(4 * 60_000)
+  // Ticks every minute read local data only, until 10 minutes have passed
+  await clock.advance(9 * 60_000)
   expect(issueReads()).toBe(1)
   await clock.advance(60_000)
   expect(issueReads()).toBe(2)
