@@ -12,7 +12,7 @@ A lane is one CLI and model that can run work. There is no global limit on jobs:
 | `codex` | OpenAI | ChatGPT Pro ($100) | heavy | 3 | on; its weekly allowance lasted about one day of full use on 2026-10-01 |
 | `gemini` | Google | Cursor Ultra | light | 2 | on, for chores and as a spare reviewing family |
 | `grok-xai` | xAI | SuperGrok, through the `grok` CLI | light | 0 | off: Garrett has only the small X subscription; Grok runs through Cursor instead |
-| `muse` | Meta | Muse Code plan | light | 0 | off: run `muse auth` once on a paid plan (never the free contributor tier, which trains on your code), then set Max jobs |
+| `muse` | Meta | Muse Code Max ($200) | light | 4 | on since 2026-10-12, with contributor mode off; its limits are not measured yet; its sandbox blocks Docker (see its launch command) |
 
 Weight is how hard a job in that lane draws on its subscription. Light lanes are where the volume goes. If the Mac itself bogs down (each build can boot a full local stack), lower the light lanes' Max jobs first.
 
@@ -42,10 +42,19 @@ cd <worktree> && nohup cursor-agent -p --output-format stream-json --model <mode
 
 `--add-dir <repo>/.git` lets a job commit inside a linked worktree. Model ids: `composer-2.5`, `grok-4.7-medium`, `grok-4.7-high`, `grok-4.7-xhigh`, `gemini-3.7-flash-high`. List them with `cursor-agent --list-models`. Use only the local CLI: Cursor's cloud agents bill at API prices. GPT and Claude models through Cursor bill differently from Cursor's own models and use up the plan faster, so they are never a lane default; run one by hand only when every lane in a routing row is out (GPT-5.6 Sol through Cursor gave a correct PASS on CallFlow PR 71).
 
+**Muse** (`muse`, proven headless 2026-10-12). It can commit in a linked worktree, push and run `gh`, so it opens its own PRs. Its built-in git skill refuses to commit or push unless the prompt allows it. So the prompt always ends with the allow line below. `--approval-mode never` with `--user-input-auto-resolve` stops it from waiting on a question. Never run it with contributor mode on: that tier trains on the code.
+
+```bash
+nohup muse exec --json --model muse-wonder-1.0 --contributor-mode off --approval-mode never --user-input-auto-resolve --workspace <worktree> "<prompt> You may commit, push this branch and open or update its PR." < /dev/null > <log> 2>&1 &
+```
+
+Its sandbox blocks the Docker socket, so a Muse job cannot start a local database or `scripts/dev up`. It runs the gates that need no database and leaves the rest to CI (see the `build` skill). Do not turn its sandbox off to get Docker: that is Garrett's decision. Model ids: `muse-wonder-1.0` (the default) and `muse-spark-1.3`.
+
 ## Telling when a lane is out
 
 A lane is out when its last job failed on a usage limit. Whoever sees the limit writes the reset time to `~/code/g-cauc/limits/<lane>` as one ISO 8601 line (the folder is gitignored). A lane is out while that time is in the future; an expired file means the lane is back. This is the kit's one cache: it is safe to delete, and deleting it only costs one failed job.
 
 - `claude`: `claude agents --json` shows a session waiting on a usage limit, with its reset time.
 - `codex`: the job log says it hit the limit and when it resets (for example "try again at Oct 6th, 2026 3:21 PM").
+- `muse`: the log ends on a `run.terminal.*` event whose `terminal` is not `completed`, with a `reason`. Its usage limit wording is not seen yet: when a job first stops on a limit, add the wording here.
 - Cursor lanes: the job log reports the usage or spend limit. Keep Cursor's on-demand spending off or capped, so overflow never bills at API prices.

@@ -212,9 +212,10 @@ export function parseJobs(out, { claude = false } = {}) {
     if (!m) continue
     const cmd = m[2]
     const argv0 = cmd.split(/\s+/)[0]
-    const base = argv0.split('/').pop()
+    // The `muse` launcher execs a versioned binary, muse-bin-<version>.
+    const base = argv0.split('/').pop().replace(/^muse-bin-.*/, 'muse')
     // Claude workers are listed by `claude agents --json` (parseClaudeAgents), so skip them here.
-    if (!['cursor-agent', 'codex', ...(claude ? ['claude'] : [])].includes(base)) continue
+    if (!['cursor-agent', 'codex', 'muse', ...(claude ? ['claude'] : [])].includes(base)) continue
     const mk = cmd.match(/\[ak:([\w.-]+)#(\d+):([\w-]+):(\d+)\]/)
     if (!mk) continue
     const model = (cmd.match(/(?:--model|\s-m)\s+(\S+)/) || [])[1] || ''
@@ -254,6 +255,7 @@ export function parseClaudeAgents(json, home, now) {
 export function laneOf(cli, model) {
   if (cli === 'claude') return 'claude'
   if (cli === 'codex') return 'codex'
+  if (cli === 'muse') return 'muse'
   const m = String(model).toLowerCase()
   if (m.startsWith('composer')) return 'composer'
   if (m.includes('grok')) return 'grok'
@@ -269,6 +271,8 @@ export function modelName(model) {
   const g = m.match(/grok-([\d.]+)-?(\w+)?/)
   if (g) return 'Grok ' + g[1] + (g[2] && !/fast/.test(g[2]) ? ' ' + g[2] : '')
   if (m.startsWith('gemini')) return 'Gemini ' + (m.match(/gemini-([\d.]+)/) || [])[1]
+  const mu = m.match(/^muse-(\w+)-([\d.]+)/)
+  if (mu) return 'Muse ' + mu[1][0].toUpperCase() + mu[1].slice(1) + ' ' + mu[2]
   if (m.startsWith('gpt')) return m.replace(/^gpt-/, 'GPT-').replace(/-(high|xhigh|low|medium)$/, ' $1')
   if (m.includes('opus')) return 'Opus'
   if (m.includes('sonnet')) return 'Sonnet'
@@ -309,7 +313,7 @@ const clip = (s, n) => {
 }
 
 // One job log, as a list of steps. Understands Cursor's stream-json, Codex's
-// --json events, and falls back to the plain text tail for anything else.
+// --json events, Muse's --json events, and falls back to the plain text tail for anything else.
 export function parseLog(text) {
   const lines = String(text || '').split('\n').filter((l) => l.trim())
   const jsonish = lines.filter((l) => l.trim().startsWith('{')).length
@@ -323,11 +327,45 @@ export function parseLog(text) {
     if (thinking && thinking.text.trim()) steps.push(thinking)
     thinking = null
   }
+  // Muse streams its words in run.output.delta pieces between tool results.
+  let saying = null
+  const flushSaying = () => {
+    if (saying && saying.text.trim()) steps.push(saying)
+    saying = null
+  }
   for (const line of lines) {
     let ev
     try {
       ev = JSON.parse(line)
     } catch {
+      continue
+    }
+    // Muse exec --json
+    if (typeof ev.payload_type === 'string' && ev.payload) {
+      const p = ev.payload
+      if (ev.payload_type === 'run.output.delta') {
+        if (!saying) saying = { kind: 'say', text: '' }
+        saying.text += p.text || ''
+        continue
+      }
+      if (ev.payload_type === 'tool.result') {
+        flushSaying()
+        const tool = (p.correlation_facts && p.correlation_facts.tool_name) || ''
+        if (tool === 'bash') {
+          let r = {}
+          try {
+            r = JSON.parse(p.text || '{}') || {}
+          } catch {}
+          steps.push({ kind: 'cmd', text: clip(r.command, 140), exit: exitOf(r.exit_code), ms: null, out: clip(r.output || '', 600) })
+        } else if (p.edit_facts && p.edit_facts.path) steps.push({ kind: 'tool', text: 'edit ' + clip(p.edit_facts.path, 100) })
+        else steps.push({ kind: 'tool', text: tool || 'tool' })
+        continue
+      }
+      if (/^run\.terminal\./.test(ev.payload_type)) {
+        flushSaying()
+        const done = p.terminal === 'completed'
+        steps.push({ kind: 'result', text: done ? 'finished' : 'failed: ' + clip(p.reason || p.text || p.terminal || '', 200), ms: null })
+      }
       continue
     }
     // Cursor stream-json
@@ -392,6 +430,7 @@ export function parseLog(text) {
     }
   }
   flushThinking()
+  flushSaying()
   return { format: 'json', steps: steps.map((st) => ({ ...st, text: sanitize(st.text, 9000), out: st.out ? sanitize(st.out, 600) : st.out })) }
 }
 

@@ -4,19 +4,19 @@ The rule of thumb: volume goes to the light lanes (Composer 2.5 and Grok 4.7 thr
 
 ## The map
 
-| Job | 1st | 2nd | 3rd |
-|---|---|---|---|
+| Job | 1st | 2nd | 3rd | 4th |
+|---|---|---|---|---|
 | Plan with Garrett (`spec`, kickoff) | `claude` Opus 5.5 | | |
 | Product pass (`propose`) | `claude` Opus 5.5 | `grok` Grok 4.7 high | |
 | CTO review of a spec (`cto-review`) | `codex` GPT-6.1 Sol | `grok` Grok 4.7 high | `claude` Opus 5.5 subagent (model `opus`), marked same family |
 | Foreman pass | `claude` Sonnet 5.5, as a Desktop task | | |
-| Build, size S, normal risk | `composer` Composer 2.5 | `grok` Grok 4.7 medium | `claude` Sonnet 5.5 |
-| Build, size M, normal risk | `grok` Grok 4.7 high | `composer` Composer 2.5 | `claude` Sonnet 5.5 |
+| Build, size S, normal risk | `composer` Composer 2.5 | `muse` Muse Wonder 1.0 | `grok` Grok 4.7 medium | `claude` Sonnet 5.5 |
+| Build, size M, normal risk | `grok` Grok 4.7 high | `muse` Muse Wonder 1.0 | `composer` Composer 2.5 | `claude` Sonnet 5.5 |
 | Build, `risk:high`, or ambiguous or cross-cutting | `claude` Opus 5.5 | `codex` GPT-6.1 Sol | `grok` Grok 4.7 xhigh |
 | Fix round (CI red, review findings, rebase) | the lane that built it | one step stronger when stalled: `grok` Grok 4.7 high | then `claude` Opus 5.5 |
-| Review, normal risk | `grok` Grok 4.7 medium | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash |
+| Review, normal risk | `grok` Grok 4.7 medium | `muse` Muse Wonder 1.0 | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash |
 | Review, `risk:high` | `codex` GPT-6.1 Sol | `claude` Opus 5.5 | `grok` Grok 4.7 high |
-| Chores (dependency bumps, lint, flaky tests, docs) | `composer` Composer 2.5 | `gemini` Gemini 3.7 Flash | |
+| Chores (dependency bumps, lint, flaky tests, docs) | `composer` Composer 2.5 | `muse` Muse Wonder 1.0 | `gemini` Gemini 3.7 Flash | |
 | Research, digests, log reading (subagents) | `claude` Sonnet 5.5 or Haiku 5.5 | `grok` Grok 4.7 high | |
 
 When the `lane:` label on an issue names a lane that is out, route by this map instead.
@@ -31,4 +31,5 @@ The reviewer's family is never one that has a commit on the branch. Families: An
 - The reviews that caught the worst defects that day (a tenant isolation bypass through foreign keys, a schema filter wildcard) were strong models reviewing a different family's work. That is why `risk:high` reviews start with GPT-6.1 Sol and Opus.
 - Fix rounds keep going while they make progress (Garrett, 2026-10-02: a PR that is nearly fixed must not park while he sleeps). A stall moves the fix to a stronger model instead of stopping; only a stall on Opus 5.5, or 12 rounds on one PR, parks it.
 - In the week to 2026-10-07, Claude builds ran as Opus subagents inside the CTO sessions. They were about two thirds of the Claude use in Bison Brain and myqap. About 95% of that cost is input: each call reads the whole context again, and a cache read costs the same on Opus 5.5 and Sonnet 5.5. So a Claude build runs as its own job (see `lanes.md`), on Sonnet 5.5 unless its row names Opus 5.5. Sonnet 5.5 also has a model limit of its own, beside the Opus limit.
+- 2026-10-12: Garrett bought Muse Code Max to take load off Claude and Codex. Muse Wonder 1.0 is new to the kit. It takes overflow in the normal-risk rows. It stays out of the `risk:high` rows until its PRs pass review. Its sandbox has no Docker, so CI runs its database gates.
 - Change this file when the evidence changes: a lane that keeps getting blocked in review moves down its build rows; a lane that keeps passing moves up.

@@ -135,9 +135,10 @@ test('only the agent CLIs count as jobs, not the shells that started them', asyn
     '16829 /Users/g/.local/bin/cursor-agent --use-system-ca /x/index.js -p --model grok-4.7-high --sandbox enabled [ak:callflow#14:agent-review:7] Use the agent-review skill',
     '17001 /Users/g/.local/bin/codex exec -m gpt-6.1-sol --sandbox workspace-write [ak:callflow#31:build:2] Use the build skill',
     '17002 /Users/g/.local/bin/claude --bg --name ak-callflow-35-build --model opus [ak:callflow#35:build:2] Use the build skill',
+    '17003 /Users/g/.local/bin/muse-bin-1.4.6-R6000.1 exec --json --model muse-wonder-1.0 --approval-mode never [ak:myqap#90:build:1] Use the build skill',
   ].join('\n')
   const jobs = parseJobs(out)
-  expect(jobs.length).toBe(2)
+  expect(jobs.length).toBe(3)
   expect(jobs[0]).toMatchObject({ pid: 16829, cli: 'cursor-agent', model: 'grok-4.7-high', project: 'callflow', issue: 14, role: 'agent-review', round: 7 })
   expect(jobs[1]).toMatchObject({ cli: 'codex', model: 'gpt-6.1-sol', issue: 31, role: 'build', round: 2 })
   expect(laneOf('cursor-agent', 'grok-4.7-high')).toBe('grok')
@@ -145,6 +146,34 @@ test('only the agent CLIs count as jobs, not the shells that started them', asyn
   expect(laneOf('codex', 'gpt-6.1-sol')).toBe('codex')
   expect(modelName('grok-4.7-high')).toBe('Grok 4.7 high')
   expect(modelName('composer-2.5')).toBe('Composer 2.5')
+  expect(jobs[2]).toMatchObject({ pid: 17003, cli: 'muse', model: 'muse-wonder-1.0', project: 'myqap', issue: 90, role: 'build', round: 1 })
+  expect(laneOf('muse', 'muse-wonder-1.0')).toBe('muse')
+  expect(modelName('muse-wonder-1.0')).toBe('Muse Wonder 1.0')
+  expect(modelName('muse-spark-1.3')).toBe('Muse Spark 1.3')
+})
+
+test('a Muse --json log becomes words, commands, edits and a result', async () => {
+  const ev = (type, payload) => JSON.stringify({ schema_version: 1, record_type: 'event', payload_type: type, payload })
+  const bash = (command, exit_code, output) => JSON.stringify({ command, description: 'x', exit_code, terminal_status: 'completed', output })
+  const log = [
+    ev('run.model.configured', { model_id: 'muse-wonder-1.0' }),
+    ev('run.output.delta', { text: 'I will run ' }),
+    ev('run.output.delta', { text: 'the fast gate.' }),
+    ev('tool.result', { text: bash('scripts/done --fast', 1, '1 failed'), correlation_facts: { tool_name: 'bash' } }),
+    ev('tool.result', { text: 'ok', correlation_facts: { tool_name: 'write_file' }, edit_facts: { tool_name: 'write_file', path: 'api/app.py', added: 3 } }),
+    ev('tool.result', { text: 'ok', correlation_facts: { tool_name: 'read_file' } }),
+    ev('run.terminal.completed', { terminal: 'completed', text: 'Done.' }),
+  ].join('\n')
+  const { format, steps } = parseLog(log)
+  expect(format).toBe('json')
+  expect(steps.map((s) => s.kind)).toEqual(['say', 'cmd', 'tool', 'tool', 'result'])
+  expect(steps[0].text).toBe('I will run the fast gate.')
+  expect(steps[1]).toMatchObject({ text: 'scripts/done --fast', exit: 1, out: '1 failed' })
+  expect(steps[2].text).toBe('edit api/app.py')
+  expect(steps[3].text).toBe('read_file')
+  expect(steps[4].text).toBe('finished')
+  const failed = parseLog(ev('run.terminal.failed', { terminal: 'failed', reason: 'usage limit reached' }))
+  expect(failed.steps[0].text).toBe('failed: usage limit reached')
 })
 
 test('times and process output parse', async () => {
