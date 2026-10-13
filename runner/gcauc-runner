@@ -72,12 +72,24 @@ parse() {
   vm="gcauc-$(printf '%s' "${repo##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
 }
 
+# Run a limactl command that starts a VM. On Linux the VM gets its own systemd scope. In the
+# gcauc-runner unit, systemd would kill the VM when serve exits, also after a drain, and the VM would
+# lose the writes that it did not sync. On 2026-10-13 that left a half-removed Postgres container in
+# gcauc-bisonbrain, and every later job of that slot failed.
+lima_start() {
+  if [ "$os" = Darwin ]; then
+    limactl "$@"
+  else
+    systemd-run --user --scope --quiet --collect limactl "$@"
+  fi
+}
+
 up_vm() {
   if ! limactl list -q 2>/dev/null | grep -qx "$vm"; then
     limactl create --name "$vm" --vm-type "$vmtype" --cpus "$cpus" --memory "$mem" --tty=false "$here/lima.yaml" </dev/null
   fi
   if [ "$(limactl list "$vm" --format '{{.Status}}')" != Running ]; then
-    limactl start "$vm" --tty=false </dev/null
+    lima_start start "$vm" --tty=false </dev/null
   fi
   # A VM that can see the Mac's files would let any job read ~/.config, ~/.aws or ~/.ssh.
   if [ "$(limactl list "$vm" --format '{{len .Config.Mounts}}')" != 0 ]; then
@@ -98,7 +110,7 @@ up_vm() {
     if [ -z "$(in_vm "$vm" docker ps -q --filter name=^gcauc- </dev/null 2>/dev/null)" ]; then
       log "$vm: resizing from $have_cpus CPUs and $have_mem GiB to $cpus and $mem"
       limactl stop "$vm" </dev/null >/dev/null 2>&1
-      limactl edit "$vm" --cpus "$cpus" --memory "$mem" --tty=false --start </dev/null >/dev/null 2>&1
+      lima_start edit "$vm" --cpus "$cpus" --memory "$mem" --tty=false --start </dev/null >/dev/null 2>&1
       limactl shell --reconnect --workdir / "$vm" -- true </dev/null
     else
       log "$vm has $have_cpus CPUs and $have_mem GiB; runner/repos asks for $cpus and $mem. Run gcauc-runner drain to resize it with no job running."
@@ -148,16 +160,45 @@ sweep() {
     </dev/null >/dev/null 2>&1 || true
 }
 
-# Drop this Mac's idle g-cauc runners. serve calls it after removing every job container, so any
-# registration still listed (even as online, until GitHub notices) has nothing behind it. drain calls
-# it with jobs running: GitHub refuses to delete a runner that runs a job, and an idle runner whose
-# registration is gone exits within a minute. Each deleted runner's name goes to .slots/.deleted,
-# so a slot that cannot read its VM in a drain knows that its runner has no job (await_container).
+# serve writes .slots/.repos once, at its start. Its mtime in seconds, its inode and its mtime in
+# nanoseconds tell one serve from the next.
+serve_stamp() {
+  if [ "$os" = Darwin ]; then
+    stat -f '%m %i %Fm' "$statedir/.repos" 2>/dev/null || true
+  else
+    stat -c '%Y %i %.9Y' "$statedir/.repos" 2>/dev/null || true
+  fi
+}
+
+# Delete this machine's idle g-cauc runners that GitHub lists. GitHub refuses to delete a runner that
+# runs a job. Each deleted runner's name goes to .slots/.deleted, so a slot in a drain knows that its
+# runner can take no job (slot, await_container). GitHub lists the oldest runners first, so it reads
+# every page.
+#   prune_stale REPO        the runners that GitHub shows online. serve calls it after removing every
+#                           job container, so these have nothing behind them, but GitHub can still
+#                           give them a job until it notices.
+#   prune_stale REPO STAMP  the runners that the serve with this stamp registered (see cmd_drain),
+#                           whatever status GitHub shows: a runner can show offline while it runs (a
+#                           network fault), and it takes a job when it connects again.
+# A runner that never connected stays offline, and GitHub removes it after a day. So the hundreds that
+# a failing slot can leave cost no delete call.
 prune_stale() {
-  local repo="$1" runners id rname
-  if ! runners="$(gh api "repos/$repo/actions/runners?per_page=100" --jq \
-    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\"))) | \"\(.id) \(.name)\"" 2>/dev/null)"; then
+  local repo="$1" stamp="${2:-}" which runners id rname
+  if [ -n "$stamp" ]; then
+    which="(.name | split(\"-\") | last | tonumber? // 0) >= ${stamp%% *}"
+  else
+    which='.status == "online"'
+  fi
+  if ! runners="$(gh api --paginate "repos/$repo/actions/runners?per_page=100" --jq \
+    ".runners[] | select(.busy == false and (.name | startswith(\"$host-\")) and ([.labels[].name] | index(\"$label\")) and ($which)) | \"\(.id) \(.name)\"" 2>/dev/null)"; then
     log "$repo: could not list runners, so no idle runner was deleted"
+    return 0
+  fi
+  # A new serve can register runners while the list runs, but it writes a new .repos first. The serve
+  # with this stamp has then exited, and the new serve removes its job containers, so no runner in the
+  # list can take a job.
+  if [ -n "$stamp" ] && [ "$(serve_stamp)" != "$stamp" ]; then
+    log "$repo: serve started again during the drain, so the drain deleted no runner"
     return 0
   fi
   while read -r id rname; do
@@ -215,12 +256,23 @@ live_states() {
   done
 }
 
+# In a drain, GitHub deleted this idle runner, so it can take no job. A runner that GitHub showed
+# offline (a network fault) learns that only when it connects again, so the slot removes its
+# container. It uses the caller's repo, n, short, vm, name and busy.
+remove_deleted() {
+  if [ "$busy" = 0 ] && [ -e "$drain_file" ] && grep -qxF "$name" "$statedir/.deleted" 2>/dev/null &&
+    in_vm "$vm" docker rm -f "gcauc-$short-$n" </dev/null >/dev/null 2>&1; then
+    log "$repo slot $n: draining, and GitHub deleted $name, so this slot removed its container"
+  fi
+}
+
 # Wait until the slot's job container is gone from its VM. The docker run client is a limactl shell
 # session, and a signal can end it while the container runs on (2026-10-13). A sweep then removes
 # the live job's services, and the next docker run fails on the taken name. A stopped container
 # keeps the name too, so the slot removes it. A failed read is no answer, so it reads again. In a
 # drain it stops when no job can run: Lima reports the VM stopped, or GitHub deleted the slot's idle
-# runner. A failed status query is no answer either.
+# runner. It removes the container of a deleted runner that it can read. A failed status query is
+# no answer either.
 # The slot keeps its state, and turns busy when the runner takes a job.
 # It uses the caller's repo, n, short, vm, name and busy.
 await_container() {
@@ -242,6 +294,7 @@ await_container() {
             busy=1
             put_state busy
           fi
+          remove_deleted
           ;;
       esac
     elif [ -e "$drain_file" ] && { [ "$(limactl list "$vm" --format '{{.Status}}' 2>/dev/null)" = Stopped ] ||
@@ -263,7 +316,7 @@ slot() {
   # each slot one fixed compose project name (the names of CallFlow's and Bison Brain's slots differ).
   local work="_work-$short-$n" events="$logdir/$short-$n.events" name jit status epid
   local state="$statedir/$short/$n" logf="$logdir/$short-$n.log"
-  local me w m go busyany held off cpid busy
+  local me w m go busyany held down off cpid busy
   # This slot's process id (bash 3.2 has no BASHPID): exec makes sh the command substitution's shell.
   me="$(exec sh -c 'echo "$PPID"')"
   put_state free
@@ -274,6 +327,7 @@ slot() {
     # progress always may, so each repo always runs 1 job. Beyond that, a slot registers only while
     # the Mac has room, so CI grows into a free Mac and backs off while Garrett's own work needs it.
     held=0
+    down=0
     while true; do
       if [ -e "$drain_file" ]; then
         log "$repo slot $n: draining, so this slot stops"
@@ -291,6 +345,16 @@ slot() {
           *) if [ "$m" -lt "$n" ]; then go=0; fi ;;
         esac
       done
+      # A runner in a VM that does not run fails at once and stays registered on GitHub for a day.
+      # On 2026-10-12 a slot of a stopped VM registered 1,562 runners in 7 hours. serve starts
+      # the VMs only at its start, so the slot waits until a restart or `gcauc-runner up` starts it.
+      if [ "$go" = 1 ] && [ "$(limactl list "$vm" --format '{{.Status}}' 2>/dev/null)" != Running ]; then
+        go=0
+        if [ "$down" = 0 ]; then
+          down=1
+          log "$repo slot $n: $vm is not running, so this slot registers no runner until it runs"
+        fi
+      fi
       if [ "$go" = 1 ] && [ "$busyany" = 1 ] && ! host_has_room; then
         go=0
         if [ "$held" = 0 ]; then
@@ -313,7 +377,7 @@ slot() {
       continue
     fi
     # Check after the mint: drain writes the file and then lists runners, so it either deletes this
-    # runner or this check sees the file. The next serve prunes the unused registration.
+    # runner or this check sees the file (GitHub then removes the unused registration after a day).
     if [ -e "$drain_file" ]; then
       log "$repo slot $n: draining, so this slot stops"
       return 0
@@ -342,6 +406,7 @@ slot() {
         busy=1
         put_state busy
       fi
+      remove_deleted
       sleep 5
     done
     wait "$cpid" || status=$?
@@ -423,17 +488,22 @@ cmd_serve() {
   log "every slot stopped (drain); exiting so the agent starts serve again"
 }
 
-# Start no new job, and delete each idle runner on GitHub (it waits for a job that must not come).
-# Busy slots finish their jobs and stop; then serve exits and the launchd agent starts it again.
+# Register no new runner, and delete each idle runner of the running serve on GitHub (it waits for a
+# job that must not come). A runner can still take a job before the drain deletes it. Busy slots
+# finish their jobs and stop. Then serve exits and the launchd agent starts it again.
 cmd_drain() {
-  local r
+  local r stamp
   load_repos
+  # serve writes .repos at its start, after the serve before it exited, and then removes the job
+  # containers of that serve. So each runner that can take a job now was registered at or after the
+  # file's mtime. With no file, no slot runs.
+  stamp="$(serve_stamp)"
   touch "$drain_file"
   # The repos in runner/repos and the repos that serve read at its start.
   for r in $({ printf '%s\n' ${lines[@]+"${lines[@]}"}; cat "$statedir/.repos" 2>/dev/null; } | awk 'NF { print $1 }' | sort -u); do
-    prune_stale "$r"
+    [ -z "$stamp" ] || prune_stale "$r" "$stamp"
   done
-  log "drain: no slot takes a new job; running jobs finish, then serve exits and the agent starts it again"
+  log "drain: no slot registers a new runner. Running jobs finish, then serve exits and the agent starts it again"
 }
 
 cmd_logs() {
@@ -488,8 +558,9 @@ EOF
 
 # Linux: a systemd user unit. Restart=always starts serve again after a drain, as KeepAlive does on
 # the Mac. KillMode=mixed sends TERM to serve alone, so its trap stops the slots and removes the job
-# containers (systemd's default would signal every process of the unit at once). Lingering keeps
-# the unit running with no login session.
+# containers (systemd's default would signal every process of the unit at once). systemd kills the
+# processes that are left when serve exits, so the VMs run in their own scopes (lima_start).
+# Lingering keeps the unit running with no login session.
 install_systemd() {
   mkdir -p "$logdir" "$(dirname "$unit")"
   cat >"$unit" <<EOF

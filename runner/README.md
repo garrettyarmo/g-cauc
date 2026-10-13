@@ -54,17 +54,17 @@ Logs: `~/Library/Logs/gcauc-runner/serve.log` (the supervisor) and `<repo>-<slot
 "Bash(/Users/garrett/code/g-cauc/runner/gcauc-runner fleet logs:*)"
 ```
 
-After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`. No slot takes a new job, and the running jobs finish. The drain deletes each idle runner on GitHub, and that runner stops within 1 minute. GitHub refuses to delete a runner that runs a job. Then `serve` exits, and the agent starts it again with the new `runner/repos`. It resizes a VM only when no job runs in it. It stops the VM of a repo that the file no longer names. The drain also deletes the idle runners of a repo that was removed from the file after `serve` started.
+After editing `runner/repos` (a new repo, a new size), run `gcauc-runner drain`. No slot registers a new runner, and the running jobs finish. The drain deletes each idle runner that the running `serve` registered on GitHub, whatever status GitHub shows. GitHub refuses to delete a runner that runs a job, and a waiting runner can take one last job before the drain deletes it. A deleted runner stops within 1 minute, and its slot removes its container. The drain keeps older runners: they failed to start or belong to an older `serve`, and GitHub removes them after 1 day. It also keeps the runners of a `serve` that starts during the drain. Then `serve` exits, and the agent starts it again with the new `runner/repos`. It resizes a VM only when no job runs in it. It stops the VM of a repo that the file no longer names. The drain also deletes the idle runners of a repo that was removed from the file after `serve` started.
 
 A drain takes as long as the longest running job, and no job fails. Do not use `launchctl kickstart -k` while jobs run: it removes every job container. After changing `image/Dockerfile`, run `rebuild`.
 
-A slot waits until its job container is gone from the VM, even when its `docker run` client ends first. It removes a container that stopped but keeps its name. In a drain, the slot stops waiting when no job can run: its VM is stopped, or GitHub deleted its idle runner. After changing a slot, run `runner/test-orphan.sh`. It runs `serve` against fake `limactl`, `docker` and `gh`, so it touches no VM and no runner.
+A slot waits until its job container is gone from the VM, even when its `docker run` client ends first. It removes a container that stopped but keeps its name. In a drain, the slot stops waiting when no job can run: its VM is stopped, or GitHub deleted its idle runner. When the slot can read the VM, it removes the container of a deleted runner. A slot registers no runner while its VM does not run. `serve` starts the VMs only at its start, so `gcauc-runner up` starts a VM that stopped. After changing a slot, run `runner/test-orphan.sh`. It runs `serve` against fake `limactl`, `docker` and `gh`, so it touches no VM and no runner.
 
 The Mac has to be awake and online for CI to run. Jobs queue while it is asleep and GitHub drops a job that waits 24 hours.
 
 ## More machines
 
-The pool can run on more than one machine. GitHub gives each job to the first free runner, so the machines need no coordination. A Linux box serves the same way as the Mac, with QEMU VMs in place of Apple's.
+The pool can run on more than one machine. GitHub gives each job to the first free runner, so the machines need no coordination. A Linux box serves the same way as the Mac, with QEMU VMs in place of Apple's. There, each VM runs in its own systemd scope, so a VM does not stop when `serve` exits.
 
 To add a Linux box:
 
