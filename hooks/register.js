@@ -1,7 +1,7 @@
 // g-cauc mod: the /board pane, the quiet line above the prompt, and the
 // permission advisor. It reads the process list and job logs on a timer. It
 // reads GitHub only on demand. It holds no state of record (GitHub and git do).
-// It keeps a shared cache in $.store, so several open sessions make one set of gh calls.
+// It keeps a shared cache in $.store, so every session shows the last read.
 
 import {
   parseProjects, parseLanes, summarizeProject, parseJobs, laneOf, modelName, parseEtime,
@@ -15,15 +15,12 @@ const PANE = 'g-cauc-board'
 // GitHub budget. Every Claude Code session on the Mac runs this module.
 // All of them share one GraphQL limit (5,000 an hour, across Garrett's tokens).
 // So the board reads GitHub only on demand: when /board opens on an old shared
-// snapshot, and on /board refresh or the Refresh button. One session reads
-// GitHub at a time (the lease). Every session stops for a while after GitHub
-// says "rate limit". The timers read local data (jobs, logs, lanes) and pick up
-// the snapshot any session saved.
+// snapshot, and on /board refresh or the Refresh button. Each read costs about
+// 19 points. Two sessions can read at once: on demand, that is rare and cheap.
+// Every session stops for a while after GitHub says "rate limit". The timers
+// read local data (jobs, logs, lanes) and pick up the snapshot any session saved.
 const FRESH_MS = 2 * 60_000 // opening /board reads GitHub when the snapshot is older than this
-const LEASE_MS = 2 * 60_000 // how long one session may hold the GitHub read
-const CLAIM_MS = 1000 // the wait between a claim of the lease and its check
 const PAUSE_MS = 10 * 60_000 // the stop after a rate limit
-const ME = Math.random().toString(36).slice(2)
 // The CI snapshot's store key names its shape, so a session never reads a
 // snapshot an older version of the board wrote.
 const CI_SNAPSHOT = 'ci-snapshot-2'
@@ -203,7 +200,6 @@ async function refresh($, gh) {
   }
   busy = true
   let cached = null
-  let holding = false
   try {
     const now = await $.clock.now()
     const pause = await $.store.get('gh-pause')
@@ -211,30 +207,9 @@ async function refresh($, gh) {
     cached = await $.store.get('snapshot')
     const ciCached = await $.store.get(CI_SNAPSHOT)
     lanes = parseLanes(await readText($, kitDir + '/lanes.md'))
-    // Refresh skips the age check. It never skips the lease or the pause.
+    // Refresh skips the age check. It never skips the pause.
     const old = !cached || !ciCached || now - Math.min(cached.at, ciCached.at) >= FRESH_MS
-    let due = !pausedUntil && (gh === NOW || (gh === IF_OLD && old))
-    let checked = 0
-    if (due) {
-      checked = await $.clock.now()
-      const lease = await $.store.get('gh-lease')
-      if (lease && now - lease.at < LEASE_MS) due = false
-    }
-    if (due) {
-      // $.store has no atomic write, so two sessions can both find the lease free.
-      // Each one claims it, waits, and reads it again. Only the last claim reads GitHub (Fischer's lock).
-      // The lock holds only when each claim lands well inside the wait. A late claim gives up.
-      // Its lease stays until it expires, and it stops this session too.
-      await $.store.set('gh-lease', { at: now, by: ME })
-      if ((await $.clock.now()) - checked >= CLAIM_MS / 2) due = false
-    }
-    if (due) {
-      await $.clock.sleep(CLAIM_MS)
-      const lease = await $.store.get('gh-lease')
-      due = Boolean(lease && lease.by === ME)
-    }
-    if (due) {
-      holding = true
+    if (!pausedUntil && (gh === NOW || (gh === IF_OLD && old))) {
       rateLimited = false
       openPrsByRepo.clear()
       projects = await gatherProjects($, cached)
@@ -271,14 +246,6 @@ async function refresh($, gh) {
       }
     }
   } finally {
-    if (holding) {
-      try {
-        const lease = await $.store.get('gh-lease')
-        if (lease && lease.by === ME) await $.store.delete('gh-lease')
-      } catch {
-        // the lease expires by itself
-      }
-    }
     busy = false
     $.ui.invalidate('ui.render')
     if (again) {

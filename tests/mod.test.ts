@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, slowLease: false, answerLease: null as null | (() => void), calls: [] as string[] }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, calls: [] as string[] }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -67,15 +67,7 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
     toasts.push(e.text)
     return { value: undefined }
   })
-  on('store.get', async ($, e) => {
-    const value = saved.get(e.key)
-    // A slow store: the read sees the lease as it is now, and answers when the test calls answerLease
-    if (e.key === 'gh-lease' && world.slowLease) {
-      world.slowLease = false
-      await new Promise<void>((resolve) => { world.answerLease = resolve })
-    }
-    return { value }
-  })
+  on('store.get', ($, e) => ({ value: saved.get(e.key) }))
   on('store.set', ($, e) => {
     saved.set(e.key, e.value)
     return { value: undefined }
@@ -125,11 +117,10 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
 
 const BAND = { plugin: 'g-cauc', component: 'AbovePrompt', requestId: 'band', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 120, scroll: { offset: 0, bodyRows: 4 }, view: {} } } as const
 
-// A GitHub read waits CLAIM_MS (1 s) after it claims the lease, so a test moves the clock past it.
-const CLAIM = 1000
+// /board answers at once and reads in the background, so a test waits for the read to end.
 async function board($, clock, args = 'refresh') {
   await $.command.run({ command: 'board', args })
-  await clock.advance(CLAIM)
+  await clock.settle()
 }
 
 test('the board shows the phase, the running review, the queue and what needs Garrett', async ($, on) => {
@@ -478,84 +469,29 @@ test('the board reads GitHub only when /board opens on an old snapshot or on Ref
   expect(issueReads()).toBe(3)
 })
 
-test('while another session reads GitHub, this one shows the shared snapshot and reads nothing, even on Refresh', async ($, on) => {
+test('a session shows the snapshot another session saved, and Refresh reads even while another session reads', async ($, on) => {
   const saved = new Map<string, unknown>()
-  const old = Date.now() - 10 * 60_000
-  saved.set('snapshot', { at: old, lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
-  saved.set('ci-snapshot-2', { at: old, vm: 'Running', billing: null, projects: [] })
+  saved.set('snapshot', { at: Date.now(), lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
+  saved.set('ci-snapshot-2', { at: Date.now(), vm: 'Running', billing: null, projects: [] })
+  // An older board writes this lease while it reads. This board ignores it.
   saved.set('gh-lease', { at: Date.now(), by: 'another session' })
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
   world.calls = []
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  // Opening the board on a fresh shared snapshot shows it and reads nothing
   await board($, clock, '')
   expect(ghCalls()).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
-  // Refresh skips the age check, not the lease: the command and the button read nothing and keep the lease
-  await board($, clock)
+  // The Refresh button and /board refresh each read at once
   await ui.press({ key: 'refresh' })
-  await clock.advance(CLAIM)
-  expect(ghCalls()).toBe(0)
-  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: 'another session' })
+  await clock.settle()
+  expect(issueReads()).toBe(1)
   await ui.unmount()
-  // A lease older than 2 minutes is dead: its session stopped, so this one reads
-  await clock.advance(2 * 60_000)
-  await board($, clock, '')
-  expect(issueReads()).toBe(1)
-  expect(saved.get('gh-lease')).toBeUndefined()
-})
-
-test('when two sessions claim a free lease at once, only the last claim reads GitHub', async ($, on) => {
-  const saved = new Map<string, unknown>()
-  const clock = mock.clock(on, { now: Date.now() })
-  stubWorld(on, saved, [])
-  world.calls = []
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
-  await clock.advance(2000)
-  // This session claims the lease and waits. Another session's claim lands during the wait.
-  await $.command.run({ command: 'board', args: 'refresh' })
-  await clock.advance(CLAIM / 2)
-  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: expect.any(String) })
-  saved.set('gh-lease', { at: clock.now(), by: 'another session' })
-  await clock.advance(CLAIM)
-  expect(ghCalls()).toBe(0)
-  expect(saved.get('gh-lease')).toEqual({ at: expect.any(Number), by: 'another session' })
-  // With no other claim, the next Refresh reads and then frees the lease
-  saved.delete('gh-lease')
   await board($, clock)
-  expect(issueReads()).toBe(1)
-  expect(saved.get('gh-lease')).toBeUndefined()
-})
-
-test('a claim that lands late gives up, so it never overlaps the session that reads', async ($, on) => {
-  const saved = new Map<string, unknown>()
-  const clock = mock.clock(on, { now: Date.now() })
-  stubWorld(on, saved, [])
-  world.calls = []
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
-  await clock.advance(2000)
-  // This session finds the lease free, but the store answers late. Another session claims the lease in the meantime.
-  world.slowLease = true
-  await $.command.run({ command: 'board', args: 'refresh' })
-  await clock.settle()
-  expect(typeof world.answerLease).toBe('function')
-  saved.set('gh-lease', { at: clock.now(), by: 'another session' })
-  await clock.advance(CLAIM)
-  world.answerLease()
-  world.answerLease = null
-  await clock.settle()
-  await clock.advance(CLAIM)
-  expect(ghCalls()).toBe(0)
-  // The late claim stays until it expires, and it stops this session too
-  expect((saved.get('gh-lease') as { by: string }).by).not.toBe('another session')
-  await board($, clock)
-  expect(ghCalls()).toBe(0)
-  await clock.advance(2 * 60_000)
-  await board($, clock)
-  expect(issueReads()).toBe(1)
-  expect(saved.get('gh-lease')).toBeUndefined()
+  expect(issueReads()).toBe(2)
 })
 
 test('a GitHub rate limit stops every session for 10 minutes, even the Refresh button, and the board says so', async ($, on) => {
