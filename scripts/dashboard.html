@@ -378,7 +378,7 @@ function render() {
   }
   const age = (Date.now() - Date.parse(DATA.generated)) / 60000
   up.replaceChildren(`${DATA.projects.length} projects · updated ${ago(DATA.generated)} ago`,
-    age > 15 ? el('span', {}, ' ', chip({ text: 'Old data: the update job may be off', tone: 'warn' })) : '')
+    age > 15 ? el('span', {}, ' ', chip({ text: 'To update: node ~/code/g-cauc/scripts/dashboard.mjs open', tone: 'warn' })) : '')
   document.getElementById('board').replaceChildren(...(DATA.projects.length ? DATA.projects.map(lane) : [el('p', { class: 'empty' }, 'No projects in projects.md.')]))
   ci()
   document.getElementById('speed').replaceChildren(speed(DATA.projects))

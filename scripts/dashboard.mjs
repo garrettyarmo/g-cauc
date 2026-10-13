@@ -6,10 +6,11 @@
 // colors (hooks/lib.js, hooks/draw.js) do the parsing and the colors.
 //
 //   node scripts/dashboard.mjs            write the page once
-//   node scripts/dashboard.mjs install    write it every 5 minutes (launchd agent)
-//   node scripts/dashboard.mjs uninstall  stop the agent
+//   node scripts/dashboard.mjs open       write the page and open it
+//   node scripts/dashboard.mjs uninstall  remove the old launchd agent that wrote it on a timer
 //
-// The page: ~/code/g-cauc/dashboard/index.html. It reloads itself every minute.
+// It reads GitHub only when you run it: all agents share one GraphQL limit.
+// The page: ~/code/g-cauc/dashboard/index.html. An open page reloads itself every minute.
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -282,29 +283,6 @@ function write() {
   console.log(`${data.generated} wrote ${file}`)
 }
 
-function install() {
-  const logs = path.join(home, 'Library/Logs/gcauc-dashboard.log')
-  fs.mkdirSync(path.dirname(plist), { recursive: true })
-  fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>${label}</string>
-  <key>ProgramArguments</key><array><string>${process.execPath}</string><string>${fileURLToPath(import.meta.url)}</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${home}/.local/bin</string></dict>
-  <key>StartInterval</key><integer>300</integer>
-  <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>${logs}</string>
-  <key>StandardErrorPath</key><string>${logs}</string>
-</dict>
-</plist>
-`)
-  const domain = `gui/${process.getuid()}`
-  run('launchctl', ['bootout', `${domain}/${label}`])
-  execFileSync('launchctl', ['bootstrap', domain, plist])
-  console.log(`installed: ${plist} (log: ${logs}). Open ${path.join(outDir, 'index.html')}`)
-}
-
 function uninstall() {
   run('launchctl', ['bootout', `gui/${process.getuid()}/${label}`])
   fs.rmSync(plist, { force: true })
@@ -313,9 +291,11 @@ function uninstall() {
 
 const cmd = process.argv[2] || 'write'
 if (cmd === 'write') write()
-else if (cmd === 'install') install()
-else if (cmd === 'uninstall') uninstall()
+else if (cmd === 'open') {
+  write()
+  execFileSync('open', [path.join(outDir, 'index.html')])
+} else if (cmd === 'uninstall') uninstall()
 else {
-  console.error('usage: dashboard.mjs [write|install|uninstall]')
+  console.error('usage: dashboard.mjs [write|open|uninstall]')
   process.exit(2)
 }

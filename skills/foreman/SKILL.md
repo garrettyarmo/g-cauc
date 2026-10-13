@@ -17,6 +17,7 @@ You run one pass and exit. You keep nothing between passes: GitHub, git and the 
   - If that job ended, or ran for 5 minutes, and its log has no usage-limit message, delete the file. The lane is back.
 - Work only in projects whose AGENTS.md says `Autonomy: unattended`. An attended project's CTO session can run you for its own project. Then do the pass for that project only.
 - Touch only build issues and their PRs. Ideas and spec PRs belong to the product pass.
+- Do not poll GitHub for CI or merges. Auto-merge merges a green PR, and the next pass sees the result. All agents share one GraphQL limit of 5,000 points an hour (Bison Brain, 2026-10-12: a loop that retried a refused merge every 20 seconds made two thirds of all gh calls). A script that must wait on a PR reads REST (`gh api`), at most once in 2 minutes. It counts only `success` on the required checks as green, and it stops at the first refused merge.
 
 ## Names that tie it together
 

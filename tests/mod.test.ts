@@ -24,7 +24,7 @@ const ISSUES = JSON.stringify([
   { number: 10, title: 'Spec 001 row 1: repo', state: 'CLOSED', labels: [], body: '', url: 'https://github.com/garrettyarmo/callflow/issues/10' },
 ])
 
-const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, calls: [] as string[] }
+const world = { ghFails: false, projectsGone: false, logFailsOnce: false, logCalls: 0, nastyTitle: false, rateLimited: false, duringGh: null as null | (() => void), calls: [] as string[] }
 
 FILES['/home/code/g-cauc/runner/repos'] = '# repo slots\ngarrettyarmo/callflow 3\n'
 FILES['/home/code/callflow/scripts/done'] = 'budget="${CALLFLOW_FULL_BUDGET:-1500}"\nbudget="${CALLFLOW_FAST_BUDGET:-200}"\n'
@@ -81,6 +81,11 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
   on('process.run', ($, e) => {
     const a = e.argv.join(' ')
     world.calls.push(a)
+    if (a.startsWith('gh') && world.duringGh) {
+      const during = world.duringGh
+      world.duringGh = null
+      during()
+    }
     if (a.startsWith('gh') && world.rateLimited) return { value: { exitCode: 1, stdout: '', stderr: 'GraphQL: API rate limit already exceeded for user ID 1.' } }
     if (a.startsWith('gh') && world.ghFails) return { value: { exitCode: 1, stdout: '', stderr: 'HTTP 502' } }
     if (a.startsWith('gh issue list')) return { value: { exitCode: 0, stdout: ISSUES, stderr: '' } }
@@ -117,6 +122,12 @@ function stubWorld(on, saved: Map<string, unknown>, toasts: string[]) {
 
 const BAND = { plugin: 'g-cauc', component: 'AbovePrompt', requestId: 'band', viewport: { columns: 140, rows: 40 }, props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 120, scroll: { offset: 0, bodyRows: 4 }, view: {} } } as const
 
+// /board answers at once and reads in the background, so a test waits for the read to end.
+async function board($, clock, args = 'refresh') {
+  await $.command.run({ command: 'board', args })
+  await clock.settle()
+}
+
 test('the board shows the phase, the running review, the queue and what needs Garrett', async ($, on) => {
   const saved = new Map<string, unknown>()
   const toasts: string[] = []
@@ -124,8 +135,7 @@ test('the board shows the phase, the running review, the queue and what needs Ga
   stubWorld(on, saved, toasts)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  await $.command.run({ command: 'board', args: '' })
-  await clock.settle()
+  await board($, clock, '')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   await ui.press({ key: 'tab-p-callflow' })
@@ -153,6 +163,7 @@ test('the Desktop app draws badges, rings, pipelines, bars, pills, cells and dot
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   for (const t of ['all', 'p-callflow', 'fleet']) {
     await ui.press({ key: 'tab-' + t })
@@ -167,6 +178,7 @@ test('the board also draws in the terminal', async ($, on) => {
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   await ui.unmount()
@@ -178,6 +190,7 @@ test('the project page shows its pool, running and stuck jobs, results, timings,
   stubWorld(on, saved, [])
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /1 busy · 1 idle · 1 offline/ })).toBeDefined()
@@ -216,23 +229,24 @@ test('a failed gh call keeps the last good board and does not repeat alerts', as
   world.ghFails = false
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   world.ghFails = true
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /gh could not read garrettyarmo\/callflow/ })).toBeDefined()
   // A second failure in a row still shows the last good board
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   // An unreadable projects.md changes nothing either
   world.ghFails = false
   world.projectsGone = true
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   world.projectsGone = false
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect(toasts.filter((t) => t.includes('needs you')).length).toBe(0)
   await ui.unmount()
 })
@@ -246,6 +260,7 @@ test('a CI snapshot an older board saved is never read back', async ($, on) => {
   world.ghFails = true
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'tab-p-callflow' })
   expect(await ui.find({ type: 'Text', text: /gh could not read the Actions runs/ })).toBeDefined()
@@ -256,27 +271,35 @@ test('a CI snapshot an older board saved is never read back', async ($, on) => {
   world.ghFails = false
 })
 
-test('a cold start with projects.md missing shows the last snapshot any session saved', async ($, on) => {
+test('a cold start shows the last snapshot any session saved, and a refresh that cannot read projects.md keeps it', async ($, on) => {
   const saved = new Map<string, unknown>()
   saved.set('snapshot', {
     at: Date.now() - 10 * 60_000,
     lanes: [{ lane: 'codex', family: 'OpenAI', weight: 'heavy', max: 3, status: 'on' }],
-    projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }],
+    projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [{ kind: 'issue', number: 16, title: 'Spec 001 row 5', url: 'https://github.com/garrettyarmo/callflow/issues/16' }], ideas: 0, merged: [] } }],
   })
   saved.set('needsSeen', ['garrettyarmo/callflow#16'])
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
-  world.projectsGone = true
+  world.calls = []
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  expect(world.calls.filter((c) => /\bgh /.test(c)).length).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
   expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
   await ui.press({ key: 'tab-fleet' })
   expect(await ui.find({ type: 'Text', text: /^0\/3/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /out until/ })).toBeDefined()
-  world.projectsGone = false
   await ui.unmount()
+  world.projectsGone = true
+  await board($, clock)
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await after.press({ key: 'tab-all' })
+  expect(await after.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
+  expect(saved.get('needsSeen')).toEqual(['garrettyarmo/callflow#16'])
+  world.projectsGone = false
+  await after.unmount()
 })
 
 test('approvals are counted by call id: only prompts you approved, and the rule lands in the session working tree', async ($, on) => {
@@ -350,9 +373,10 @@ test('a job log GitHub has not finished uploading is read again on a later refre
   world.logCalls = 0
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   const k = 'ci-run\u0000garrettyarmo/callflow\u0000403'
   expect((saved.get(k) as { retry?: boolean; fast: unknown }).retry).toBe(true)
-  await $.command.run({ command: 'board', args: 'refresh' })
+  await board($, clock)
   expect((saved.get(k) as { fast: { seconds: number } }).fast.seconds).toBe(127)
   world.logFailsOnce = false
 })
@@ -364,6 +388,7 @@ test('a control character in a PR title is dropped, and the project page still d
   world.nastyTitle = true
   await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  await board($, clock)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'tab-p-callflow' })
@@ -382,6 +407,7 @@ test('each project is drawn in its own color from projects.md, and a project wit
     stubWorld(on, saved, [])
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/home/code/callflow' })
     await clock.advance(2000)
+    await board($, clock)
     const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
     // The All page: one card per project, each with a badge in its color (Bison Brain has none, so the second fallback).
     // No borders, percent widths or wrapping: the Desktop app showed no pane after 0.6.0 added them (2026-10-05).
@@ -415,52 +441,62 @@ test('each project is drawn in its own color from projects.md, and a project wit
 })
 
 const issueReads = () => world.calls.filter((c) => c.startsWith('gh issue list')).length
+const ghCalls = () => world.calls.filter((c) => /\bgh /.test(c)).length
 
-test('the board reads GitHub every 5 minutes when no pane is open, every 2 minutes when one is, and once per refresh for open PRs', async ($, on) => {
+test('the board reads GitHub only when /board opens on an old snapshot or on Refresh, never on a timer', async ($, on) => {
   const saved = new Map<string, unknown>()
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
   world.calls = []
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
+  expect(ghCalls()).toBe(0)
+  // Opening the board reads GitHub once: one open-PR read per project, which the CI read reuses
+  await board($, clock, '')
   expect(issueReads()).toBe(1)
-  // One open-PR read per project: the CI read reuses it
   expect(world.calls.filter((c) => c.startsWith('gh pr list') && c.includes('--state open')).length).toBe(1)
-  // Ticks every minute read local data only, until 5 minutes have passed
-  await clock.advance(4 * 60_000)
-  expect(issueReads()).toBe(1)
-  await clock.advance(60_000)
+  // An open pane does not poll: the ticks read local data only
+  const read = ghCalls()
+  await clock.advance(15 * 60_000)
+  expect(ghCalls()).toBe(read)
+  // The band shows how old the snapshot is
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await band.find({ type: 'Text', text: /\/board · \d+m ago/ })).toBeDefined()
+  await band.unmount()
+  // Opening the board on a snapshot older than 2 minutes reads again, on a newer one it does not
+  await board($, clock, '')
   expect(issueReads()).toBe(2)
-  // With the pane open, GitHub is read every 2 minutes
-  await $.command.run({ command: 'board', args: '' })
   await clock.advance(60_000)
+  await board($, clock, '')
   expect(issueReads()).toBe(2)
-  await clock.advance(60_000)
-  expect(issueReads()).toBe(3)
   // The Refresh button reads at once
-  await $.command.run({ command: 'board', args: 'refresh' })
-  expect(issueReads()).toBe(4)
+  await board($, clock)
+  expect(issueReads()).toBe(3)
 })
 
-test('while another session reads GitHub, this one shows the shared snapshot and reads nothing', async ($, on) => {
+test('a session shows the snapshot another session saved, and Refresh reads even while another session reads', async ($, on) => {
   const saved = new Map<string, unknown>()
-  const old = Date.now() - 10 * 60_000
-  saved.set('snapshot', { at: old, lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
-  saved.set('ci-snapshot-2', { at: old, vm: 'Running', billing: null, projects: [] })
+  saved.set('snapshot', { at: Date.now(), lanes: [], projects: [{ name: 'CallFlow', repo: 'garrettyarmo/callflow', path: '/home/code/callflow', key: 'callflow', priority: 1, summary: { autonomy: 'attended', phase: { n: 1, title: 'Walking skeleton', exit: '', done: 1, total: 4 }, specs: [], building: [], inReview: [], ready: [], needs: [], ideas: 0, merged: [] } }] })
+  saved.set('ci-snapshot-2', { at: Date.now(), vm: 'Running', billing: null, projects: [] })
+  // An older board writes this lease while it reads. This board ignores it.
   saved.set('gh-lease', { at: Date.now(), by: 'another session' })
   const clock = mock.clock(on, { now: Date.now() })
   stubWorld(on, saved, [])
   world.calls = []
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
   await clock.advance(2000)
-  expect(world.calls.filter((c) => c.startsWith('gh ')).length).toBe(0)
+  // Opening the board on a fresh shared snapshot shows it and reads nothing
+  await board($, clock, '')
+  expect(ghCalls()).toBe(0)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Phase 1 · Walking skeleton/ })).toBeDefined()
-  await ui.unmount()
-  // A lease older than 2 minutes is dead: its session stopped, so this one reads
-  await clock.advance(2 * 60_000)
+  // The Refresh button and /board refresh each read at once
+  await ui.press({ key: 'refresh' })
+  await clock.settle()
   expect(issueReads()).toBe(1)
-  expect(saved.get('gh-lease')).toBeUndefined()
+  await ui.unmount()
+  await board($, clock)
+  expect(issueReads()).toBe(2)
 })
 
 test('a GitHub rate limit stops every session for 10 minutes, even the Refresh button, and the board says so', async ($, on) => {
@@ -472,9 +508,10 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
   try {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
     await clock.advance(2000)
+    await board($, clock)
     expect(issueReads()).toBe(1)
     expect((saved.get('gh-pause') as { until: number }).until).toBeGreaterThan(Date.now() + 9 * 60_000)
-    await $.command.run({ command: 'board', args: 'refresh' })
+    await board($, clock)
     await clock.advance(5 * 60_000)
     expect(issueReads()).toBe(1)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -482,10 +519,44 @@ test('a GitHub rate limit stops every session for 10 minutes, even the Refresh b
     await ui.unmount()
     world.rateLimited = false
     await clock.advance(6 * 60_000)
+    await board($, clock)
     expect(issueReads()).toBe(2)
     expect(saved.get('gh-pause')).toBeDefined()
+    // The expired stop is deleted
+    expect([...saved.keys()].filter((k) => k.startsWith('gh-pause-'))).toEqual([])
   } finally {
     world.rateLimited = false
+  }
+})
+
+test('a session that hits a rate limit never shortens a later stop that another session saved', async ($, on) => {
+  const saved = new Map<string, unknown>()
+  const clock = mock.clock(on, { now: Date.now() })
+  stubWorld(on, saved, [])
+  world.calls = []
+  world.rateLimited = true
+  try {
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/home/code/callflow' })
+    await clock.advance(2000)
+    // While this session reads, another session hits a rate limit later and saves a stop that ends later
+    world.duringGh = () => {
+      const until = clock.now() + 11 * 60_000
+      saved.set('gh-pause-' + until, { until })
+      saved.set('gh-pause', { until })
+    }
+    await board($, clock)
+    expect(issueReads()).toBe(1)
+    world.rateLimited = false
+    // This session's own stop ends after 10 minutes, and the later stop still holds
+    await clock.advance(10 * 60_000 + 1000)
+    await board($, clock)
+    expect(issueReads()).toBe(1)
+    await clock.advance(60_000)
+    await board($, clock)
+    expect(issueReads()).toBe(2)
+  } finally {
+    world.rateLimited = false
+    world.duringGh = null
   }
 })
 
