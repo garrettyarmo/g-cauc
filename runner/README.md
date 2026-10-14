@@ -33,7 +33,9 @@ A residual risk stays: a compose network that a job creates adds a gateway addre
 
 Lima's guest agent sets the VM clock to the host's time every 10 s when the two differ by more than 100 ms. It sets the clock back as well as forward, and Lima has no setting to stop this (up to v2.3.0-beta.1). systemd-timesyncd in the VM reads each step back as a slow clock and makes the clock faster, so the next step comes sooner. In the Mac VMs the clock stepped back by 0.1 to 0.5 s up to 30 times an hour, and CallFlow tests saw `created_at` values out of order.
 
-So each start of `serve` (and `up`) takes `CAP_SYS_TIME` from the guest agent, with a drop-in in `/etc/systemd/system/lima-guestagent.service.d`. timesyncd alone then keeps the clock. After the host sleeps, the VM clock is late until the next timesyncd poll, so a drop-in in `/etc/systemd/timesyncd.conf.d` makes timesyncd poll at least every 64 s. If serve cannot write a drop-in, it logs this and goes on.
+So each start of `serve` (and `up`) takes `CAP_SYS_TIME` from the guest agent, with a drop-in in `/etc/systemd/system/lima-guestagent.service.d`. timesyncd then keeps the clock. After the host sleeps, the VM clock is late until the next timesyncd poll. So a drop-in in `/etc/systemd/timesyncd.conf.d` keeps the polls at most 64 s apart while NTP is reachable. serve restarts each service until the running service has its setting, so a failed restart is tried again at the next start. When timesyncd does not run in a VM, serve logs this, and the guest agent keeps `CAP_SYS_TIME`. If serve cannot write a drop-in, it logs this and goes on.
+
+Some steps back stay possible. timesyncd itself steps the clock when it is more than 0.4 s off, for example when a VM is ahead after a boot. A job that is root in the VM through the Docker socket can also set the clock. These steps are rare.
 
 ## Security model
 
