@@ -102,6 +102,14 @@ up_vm() {
   if ! in_vm "$vm" docker info </dev/null >/dev/null 2>&1; then
     limactl shell --reconnect --workdir / "$vm" -- true </dev/null
   fi
+  # A job container shares the network of its VM (--network host). Chromium in an e2e job ends each
+  # load in flight with ERR_NETWORK_CHANGED when an address in the VM changes. A docker build step or
+  # a bridge container adds a veth, and the kernel gives it an IPv6 link-local address after about
+  # 1.5 s. With addr_gen_mode 1, a new veth or bridge gets no such address. The file in /etc/sysctl.d
+  # applies it after each boot too. A failure (for example a read-only disk) only logs, so the other
+  # VMs still serve.
+  in_vm "$vm" sudo sh -c 'l=net.ipv6.conf.default.addr_gen_mode=1 f=/etc/sysctl.d/60-gcauc-veth.conf; sysctl -q -w "$l" && { grep -qxF "$l" "$f" 2>/dev/null || echo "$l" >"$f"; }' </dev/null ||
+    log "$vm: could not set addr_gen_mode=1, so e2e jobs in it can fail with ERR_NETWORK_CHANGED"
   local have_cpus have_mem
   have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
   have_mem="$(($(limactl list "$vm" --format '{{.Memory}}') / 1073741824))"
