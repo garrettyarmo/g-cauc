@@ -117,14 +117,15 @@ up_vm() {
   # CAP_SYS_TIME the guest agent cannot set the clock, and timesyncd keeps it. timesyncd itself steps
   # the clock when it is more than 0.4 s off, so a step back is still possible, but rare. After the
   # host sleeps, the VM clock is late until the next timesyncd poll, so polls are at most 64 s apart
-  # (while NTP is reachable). The guest agent keeps CAP_SYS_TIME when timesyncd does not run. Each
+  # (while NTP is reachable). When timesyncd does not run, serve does not take CAP_SYS_TIME from the
+  # guest agent, but it does not give it back to an agent that lost it at an earlier start. Each
   # command restarts its service when the running service does not have the setting yet, so a
   # failed restart is tried again at the next start.
   if in_vm "$vm" sudo sh -c 'systemctl is-active -q systemd-timesyncd || exit 1; d=/etc/systemd/timesyncd.conf.d l=PollIntervalMaxSec=64; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Time]"; echo "$l"; } >$d/60-gcauc-time.conf; } || exit 1; [ "$(timedatectl show-timesync -p PollIntervalMaxUSec --value)" = "1min 4s" ] || systemctl restart systemd-timesyncd' </dev/null; then
     in_vm "$vm" sudo sh -c 'd=/etc/systemd/system/lima-guestagent.service.d l="CapabilityBoundingSet=~CAP_SYS_TIME"; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Service]"; echo "$l"; } >$d/60-gcauc-time.conf; } || exit 1; p=$(systemctl show -p MainPID --value lima-guestagent); b=$(sed -n "s/^CapBnd:[[:space:]]*//p" /proc/$p/status 2>/dev/null); [ -n "$b" ] && [ $((0x$b >> 25 & 1)) = 0 ] || { systemctl daemon-reload && systemctl restart lima-guestagent; }' </dev/null ||
       log "$vm: could not stop Lima's clock steps, so the clock in it can step back"
   else
-    log "$vm: timesyncd does not run or did not take the 64 s poll interval, so Lima still sets the clock in it"
+    log "$vm: timesyncd does not run or did not take the 64 s poll interval, so serve leaves Lima's guest agent as it is"
   fi
   local have_cpus have_mem
   have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
