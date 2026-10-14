@@ -10,6 +10,8 @@
 # GitHub shows, and the slot then removes its container, also after its client ends. A drain deletes
 # no runner when serve starts again during its list. serve also sets each VM to give no IPv6 link-local
 # address to a new veth or bridge (Bison Brain issue 745), and a failure there does not stop serve.
+# The two scripts that stop Lima's clock steps in each VM run against a fake root: each restarts its
+# service until the service has its setting, and the guest agent keeps CAP_SYS_TIME without timesyncd.
 # serve runs here against fake limactl, docker and gh in a scratch folder, so no VM, runner
 # registration or container is touched.
 #   runner/test-orphan.sh [gcauc-runner to test]   (default: the one next to this file)
@@ -212,7 +214,8 @@ runner() { printf '{"id": %s, "name": "%s", "status": "%s", "busy": %s, "labels"
 page() { local IFS=,; printf '{"total_count": 0, "runners": [%s]}\n' "$*"; }
 
 # 0. The VM does not run: the slot registers no runner and logs it once. It goes on when the VM runs.
-# The sysctl for Bison Brain issue 745 fails, and serve goes on.
+# The sysctl for Bison Brain issue 745 and the timesyncd script fail, and serve goes on. Then it
+# does not take CAP_SYS_TIME from Lima's guest agent, because nothing else would keep the clock.
 echo Stopped >"$FAKE/vmstatus"
 touch "$FAKE/nosudo"
 start_serve
@@ -225,6 +228,9 @@ grep -q '^start gcauc-fake' "$FAKE/starts" 2>/dev/null || fail "serve did not st
 grep -qxF 'sh -c l=net.ipv6.conf.default.addr_gen_mode=1 f=/etc/sysctl.d/60-gcauc-veth.conf; sysctl -q -w "$l" && { grep -qxF "$l" "$f" 2>/dev/null || echo "$l" >"$f"; }' "$FAKE/sudo" 2>/dev/null ||
   fail "serve did not stop the IPv6 link-local address of a new interface in the VM"
 grep -q 'gcauc-fake: could not set addr_gen_mode=1' "$FAKE/serve.log" || fail "serve did not log the failed sysctl"
+grep -qF 'timesyncd.conf.d' "$FAKE/sudo" 2>/dev/null || fail "serve did not set the timesyncd poll interval in the VM"
+grep -q 'gcauc-fake: timesyncd does not run' "$FAKE/serve.log" || fail "serve did not log the failed timesyncd script"
+if grep -qF 'lima-guestagent' "$FAKE/sudo"; then fail "serve took CAP_SYS_TIME from the guest agent while timesyncd did not run"; fi
 rm -f "$FAKE/nosudo"
 if [ "$(uname -s)" = Darwin ]; then
   [ ! -e "$FAKE/scopes" ] || fail "serve used systemd-run on the Mac"
@@ -354,4 +360,63 @@ in_fake drain >"$FAKE/drain.log" 2>&1 || fail "drain failed: $(cat "$FAKE/drain.
 [ ! -e "$FAKE/onlist" ] || fail "the drain did not list the runners"
 got="$({ sed -n 's#.*runners/\([0-9]*\).*#\1#p' "$FAKE/deletes" 2>/dev/null || true; } | sort | tr '\n' ' ')"
 [ -z "$got" ] || fail "the drain deleted runners '$got' after serve started again during its list"
-echo "PASS: the slot waited for its VM and its container, removed a stopped container, ended in a drain when no job could run or GitHub deleted its runner, and the drain deleted only the idle runners of the running serve"
+
+# 7. The two clock scripts that serve ran in the VM run here against a fake root, systemctl and
+# timedatectl. A failed restart changes no running service, and the next run restarts it again.
+# A run after both restarts restarts nothing. The timesyncd script fails when timesyncd does not run.
+r="$FAKE/root"
+mkdir -p "$r/proc/42" "$FAKE/clockbin"
+printf 'CapBnd:\t000001ffffffffff\n' >"$r/proc/42/status"
+echo '34min 8s' >"$r/poll"
+# The fake guest agent gets the drop-in at its restart only after a daemon-reload, as in systemd.
+cat >"$FAKE/clockbin/systemctl" <<'EOF'
+#!/bin/sh
+r="$FAKE/root"
+echo "$*" >>"$r/systemctl"
+case "$*" in
+  'is-active -q systemd-timesyncd') [ ! -e "$r/notimesyncd" ] ;;
+  'show -p MainPID --value lima-guestagent') echo 42 ;;
+  daemon-reload) cat "$r/etc/systemd/system/lima-guestagent.service.d/"*.conf >"$r/loaded" 2>/dev/null || : ;;
+  'restart lima-guestagent')
+    [ ! -e "$r/norestart" ] || exit 1
+    b=000001ffffffffff
+    if grep -qxF 'CapabilityBoundingSet=~CAP_SYS_TIME' "$r/loaded" 2>/dev/null; then b=000001fffdffffff; fi
+    printf 'CapBnd:\t%s\n' "$b" >"$r/proc/42/status" ;;
+  'restart systemd-timesyncd')
+    [ ! -e "$r/norestart" ] || exit 1
+    if grep -qxF PollIntervalMaxSec=64 "$r/etc/systemd/timesyncd.conf.d/60-gcauc-time.conf"; then echo '1min 4s'; else echo '34min 8s'; fi >"$r/poll" ;;
+  *) exit 1 ;;
+esac
+EOF
+# shellcheck disable=SC2016
+printf '#!/bin/sh\n[ "$*" = "show-timesync -p PollIntervalMaxUSec --value" ] && cat "$FAKE/root/poll"\n' >"$FAKE/clockbin/timedatectl"
+chmod +x "$FAKE/clockbin/"*
+# clock_script NAME: the script of the first sudo call that names NAME, with its paths moved into $r.
+clock_script() { grep -m1 -F "$1" "$FAKE/sudo" | sed "s#^sh -c ##; s#/etc/#$r/etc/#g; s#/proc/#$r/proc/#g"; }
+ts="$(clock_script timesyncd.conf.d)"
+ga="$(clock_script lima-guestagent.service.d)"
+[ -n "$ga" ] || fail "serve did not take CAP_SYS_TIME from the guest agent while timesyncd ran"
+# The VMs run Ubuntu, where sh is dash.
+vmsh="$(command -v dash || echo sh)"
+run_clock() { PATH="$FAKE/clockbin:$PATH" "$vmsh" -c "$1" 2>>"$r/stderr"; }
+touch "$r/norestart"
+if run_clock "$ts"; then fail "the timesyncd script succeeded although its restart failed"; fi
+if run_clock "$ga"; then fail "the guest agent script succeeded although its restart failed"; fi
+printf '[Time]\nPollIntervalMaxSec=64\n' | cmp -s - "$r/etc/systemd/timesyncd.conf.d/60-gcauc-time.conf" ||
+  fail "the timesyncd drop-in is wrong: $(cat "$r/etc/systemd/timesyncd.conf.d/60-gcauc-time.conf" 2>&1)"
+printf '[Service]\nCapabilityBoundingSet=~CAP_SYS_TIME\n' | cmp -s - "$r/etc/systemd/system/lima-guestagent.service.d/60-gcauc-time.conf" ||
+  fail "the guest agent drop-in is wrong: $(cat "$r/etc/systemd/system/lima-guestagent.service.d/60-gcauc-time.conf" 2>&1)"
+rm -f "$r/norestart" "$r/systemctl"
+run_clock "$ts" || fail "the timesyncd script failed: $(cat "$r/stderr")"
+run_clock "$ga" || fail "the guest agent script failed: $(cat "$r/stderr")"
+grep -qx 'restart systemd-timesyncd' "$r/systemctl" || fail "the timesyncd script did not try its restart again"
+grep -qx 'restart lima-guestagent' "$r/systemctl" || fail "the guest agent script did not try its restart again"
+[ "$(cat "$r/poll")" = '1min 4s' ] || fail "timesyncd did not take the 64 s poll interval"
+grep -q 000001fffdffffff "$r/proc/42/status" || fail "the guest agent kept CAP_SYS_TIME"
+rm -f "$r/systemctl"
+run_clock "$ts" || fail "the timesyncd script failed with nothing to do: $(cat "$r/stderr")"
+run_clock "$ga" || fail "the guest agent script failed with nothing to do: $(cat "$r/stderr")"
+if grep -Eq 'restart|daemon-reload' "$r/systemctl"; then fail "a clock script restarted a service that had its setting: $(cat "$r/systemctl")"; fi
+touch "$r/notimesyncd"
+if run_clock "$ts"; then fail "the timesyncd script succeeded although timesyncd did not run"; fi
+echo "PASS: the slot waited for its VM and its container, removed a stopped container, ended in a drain when no job could run or GitHub deleted its runner, the drain deleted only the idle runners of the running serve, and the clock scripts restarted each service until it had its setting"
