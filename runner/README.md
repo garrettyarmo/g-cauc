@@ -25,6 +25,12 @@ Each slot has its own work folder (`/home/runner/_work-<repo>-<n>`). `scripts/de
 
 During a job, its slot records each container that the job creates. After the job, the slot removes the containers and the volumes of each compose project under the slot's folder. This includes a project that the job stopped before it ended. Thus the next job gets a new database. The slot also removes unused anonymous volumes at once, and other unused named volumes after 6 hours (GitHub's job limit).
 
+Each job container uses the network of its VM (`--network host`). Chromium in an e2e job ends each load in flight with `net::ERR_NETWORK_CHANGED` when an address in the VM changes. A docker build step or a bridge container in any job adds a veth to the VM. The kernel gives the veth an IPv6 link-local address after about 1.5 s, and removes it with the veth. That caused Bison Brain issue 745.
+
+So each start of `serve` (and `up`) sets `net.ipv6.conf.default.addr_gen_mode=1` in each VM, in `/etc/sysctl.d/60-gcauc-veth.conf`. A new interface in the VM's own network (the host end of a veth, or a new bridge) then gets no IPv6 link-local address. Interfaces that exist already (docker0 until the next boot of the VM) keep the old value. If serve cannot set the value, it logs this and goes on.
+
+A residual risk stays: a compose network that a job creates adds a gateway address on its bridge, and its removal deletes that address. A job can remove it, and so can a slot's sweep after a job ends. An e2e job is safe from this only when no compose network in the same VM is created or removed during its tests. Bison Brain runs its Postgres on the host network (its issue 91).
+
 ## Security model
 
 - **One VM for each project.** A job can reach only its own project's VM. Thus a bad job or a cleanup error in one project cannot damage the jobs of another project. On 2026-10-04, before this change, a Bison Brain job removed the database of a running CallFlow job.

@@ -8,7 +8,8 @@
 # registers no runner, and on Linux serve starts the VM in its own systemd scope. A drain reads every
 # page of runners and deletes each idle runner that the running serve registered, whatever status
 # GitHub shows, and the slot then removes its container, also after its client ends. A drain deletes
-# no runner when serve starts again during its list.
+# no runner when serve starts again during its list. serve also sets each VM to give no IPv6 link-local
+# address to a new veth or bridge (Bison Brain issue 745), and a failure there does not stop serve.
 # serve runs here against fake limactl, docker and gh in a scratch folder, so no VM, runner
 # registration or container is touched.
 #   runner/test-orphan.sh [gcauc-runner to test]   (default: the one next to this file)
@@ -169,6 +170,9 @@ for p in $(/usr/bin/pgrep -f "$1"); do
   case "$(ps -o command= -p "$p")" in *"$FAKE/"*) kill "$p" ;; esac
 done
 EOF
+# sudo in the fake VM runs nothing. A call shows as a line in $FAKE/sudo, and it fails while
+# $FAKE/nosudo exists.
+printf '#!/bin/sh\necho "$*" >>"$FAKE/sudo"\n[ ! -e "$FAKE/nosudo" ]\n' >"$FAKE/vmbin/sudo"
 printf '#!/bin/sh\necho 999\n' >"$FAKE/vmbin/stat"
 printf '#!/bin/sh\necho 2\n' >"$FAKE/vmbin/nproc"
 chmod +x "$FAKE/bin/"* "$FAKE/vmbin/"*
@@ -208,13 +212,20 @@ runner() { printf '{"id": %s, "name": "%s", "status": "%s", "busy": %s, "labels"
 page() { local IFS=,; printf '{"total_count": 0, "runners": [%s]}\n' "$*"; }
 
 # 0. The VM does not run: the slot registers no runner and logs it once. It goes on when the VM runs.
+# The sysctl for Bison Brain issue 745 fails, and serve goes on.
 echo Stopped >"$FAKE/vmstatus"
+touch "$FAKE/nosudo"
 start_serve
 wait_for 30 vm_down_logged || fail "the slot did not tell that its VM does not run"
 sleep 12
 [ ! -e "$FAKE/mints" ] || fail "the slot minted a runner config while its VM did not run"
 [ "$(grep -c 'is not running' "$FAKE/serve.log")" = 1 ] || fail "the slot told more than once that its VM does not run"
 grep -q '^start gcauc-fake' "$FAKE/starts" 2>/dev/null || fail "serve did not start the VM"
+# shellcheck disable=SC2016
+grep -qxF 'sh -c l=net.ipv6.conf.default.addr_gen_mode=1 f=/etc/sysctl.d/60-gcauc-veth.conf; sysctl -q -w "$l" && { grep -qxF "$l" "$f" 2>/dev/null || echo "$l" >"$f"; }' "$FAKE/sudo" 2>/dev/null ||
+  fail "serve did not stop the IPv6 link-local address of a new interface in the VM"
+grep -q 'gcauc-fake: could not set addr_gen_mode=1' "$FAKE/serve.log" || fail "serve did not log the failed sysctl"
+rm -f "$FAKE/nosudo"
 if [ "$(uname -s)" = Darwin ]; then
   [ ! -e "$FAKE/scopes" ] || fail "serve used systemd-run on the Mac"
 else
