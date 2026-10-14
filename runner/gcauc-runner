@@ -110,6 +110,16 @@ up_vm() {
   # VMs still serve.
   in_vm "$vm" sudo sh -c 'l=net.ipv6.conf.default.addr_gen_mode=1 f=/etc/sysctl.d/60-gcauc-veth.conf; sysctl -q -w "$l" && { grep -qxF "$l" "$f" 2>/dev/null || echo "$l" >"$f"; }' </dev/null ||
     log "$vm: could not set addr_gen_mode=1, so e2e jobs in it can fail with ERR_NETWORK_CHANGED"
+  # Lima's guest agent sets the VM clock to the host's time every 10 s when the two differ by more
+  # than 100 ms, back as well as forward. systemd-timesyncd in the VM reads each step back as a slow
+  # clock and makes the clock faster, so the next step comes sooner. In the Mac VMs the clock stepped
+  # back up to 30 times an hour, and CallFlow tests saw created_at values out of order. Without
+  # CAP_SYS_TIME the guest agent cannot set the clock, and timesyncd alone keeps it. After the host
+  # sleeps, the VM clock is late until the next timesyncd poll, so polls come at least every 64 s.
+  in_vm "$vm" sudo sh -c 'd=/etc/systemd/system/lima-guestagent.service.d l="CapabilityBoundingSet=~CAP_SYS_TIME"; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Service]"; echo "$l"; } >$d/60-gcauc-time.conf && systemctl daemon-reload && systemctl restart lima-guestagent; }' </dev/null ||
+    log "$vm: could not stop Lima's clock steps, so the clock in it can step back"
+  in_vm "$vm" sudo sh -c 'd=/etc/systemd/timesyncd.conf.d l=PollIntervalMaxSec=64; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Time]"; echo "$l"; } >$d/60-gcauc-time.conf && systemctl restart systemd-timesyncd; }' </dev/null ||
+    log "$vm: could not set the timesyncd poll interval, so its clock stays late longer after the host sleeps"
   local have_cpus have_mem
   have_cpus="$(limactl list "$vm" --format '{{.CPUs}}')"
   have_mem="$(($(limactl list "$vm" --format '{{.Memory}}') / 1073741824))"

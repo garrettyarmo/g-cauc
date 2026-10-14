@@ -212,7 +212,7 @@ runner() { printf '{"id": %s, "name": "%s", "status": "%s", "busy": %s, "labels"
 page() { local IFS=,; printf '{"total_count": 0, "runners": [%s]}\n' "$*"; }
 
 # 0. The VM does not run: the slot registers no runner and logs it once. It goes on when the VM runs.
-# The sysctl for Bison Brain issue 745 fails, and serve goes on.
+# The sysctl for Bison Brain issue 745 and the two clock drop-ins fail, and serve goes on.
 echo Stopped >"$FAKE/vmstatus"
 touch "$FAKE/nosudo"
 start_serve
@@ -225,6 +225,14 @@ grep -q '^start gcauc-fake' "$FAKE/starts" 2>/dev/null || fail "serve did not st
 grep -qxF 'sh -c l=net.ipv6.conf.default.addr_gen_mode=1 f=/etc/sysctl.d/60-gcauc-veth.conf; sysctl -q -w "$l" && { grep -qxF "$l" "$f" 2>/dev/null || echo "$l" >"$f"; }' "$FAKE/sudo" 2>/dev/null ||
   fail "serve did not stop the IPv6 link-local address of a new interface in the VM"
 grep -q 'gcauc-fake: could not set addr_gen_mode=1' "$FAKE/serve.log" || fail "serve did not log the failed sysctl"
+# shellcheck disable=SC2016
+grep -qxF 'sh -c d=/etc/systemd/system/lima-guestagent.service.d l="CapabilityBoundingSet=~CAP_SYS_TIME"; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Service]"; echo "$l"; } >$d/60-gcauc-time.conf && systemctl daemon-reload && systemctl restart lima-guestagent; }' "$FAKE/sudo" 2>/dev/null ||
+  fail "serve did not stop Lima's guest agent from setting the clock in the VM"
+grep -q "gcauc-fake: could not stop Lima's clock steps" "$FAKE/serve.log" || fail "serve did not log the failed guest agent drop-in"
+# shellcheck disable=SC2016
+grep -qxF 'sh -c d=/etc/systemd/timesyncd.conf.d l=PollIntervalMaxSec=64; grep -qxF "$l" $d/60-gcauc-time.conf 2>/dev/null || { mkdir -p $d && { echo "[Time]"; echo "$l"; } >$d/60-gcauc-time.conf && systemctl restart systemd-timesyncd; }' "$FAKE/sudo" 2>/dev/null ||
+  fail "serve did not set the timesyncd poll interval in the VM"
+grep -q 'gcauc-fake: could not set the timesyncd poll interval' "$FAKE/serve.log" || fail "serve did not log the failed timesyncd drop-in"
 rm -f "$FAKE/nosudo"
 if [ "$(uname -s)" = Darwin ]; then
   [ ! -e "$FAKE/scopes" ] || fail "serve used systemd-run on the Mac"

@@ -31,6 +31,10 @@ So each start of `serve` (and `up`) sets `net.ipv6.conf.default.addr_gen_mode=1`
 
 A residual risk stays: a compose network that a job creates adds a gateway address on its bridge, and its removal deletes that address. A job can remove it, and so can a slot's sweep after a job ends. An e2e job is safe from this only when no compose network in the same VM is created or removed during its tests. Bison Brain runs its Postgres on the host network (its issue 91).
 
+Lima's guest agent sets the VM clock to the host's time every 10 s when the two differ by more than 100 ms. It sets the clock back as well as forward, and Lima has no setting to stop this (up to v2.3.0-beta.1). systemd-timesyncd in the VM reads each step back as a slow clock and makes the clock faster, so the next step comes sooner. In the Mac VMs the clock stepped back by 0.1 to 0.5 s up to 30 times an hour, and CallFlow tests saw `created_at` values out of order.
+
+So each start of `serve` (and `up`) takes `CAP_SYS_TIME` from the guest agent, with a drop-in in `/etc/systemd/system/lima-guestagent.service.d`. timesyncd alone then keeps the clock. After the host sleeps, the VM clock is late until the next timesyncd poll, so a drop-in in `/etc/systemd/timesyncd.conf.d` makes timesyncd poll at least every 64 s. If serve cannot write a drop-in, it logs this and goes on.
+
 ## Security model
 
 - **One VM for each project.** A job can reach only its own project's VM. Thus a bad job or a cleanup error in one project cannot damage the jobs of another project. On 2026-10-04, before this change, a Bison Brain job removed the database of a running CallFlow job.
