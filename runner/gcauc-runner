@@ -10,8 +10,10 @@
 #   gcauc-runner drain      let running jobs finish and start no new one; serve then exits and the
 #                           agent starts it again with runner/repos (a new repo, a new VM size,
 #                           a removed repo's VM stopped)
-#   gcauc-runner fleet status|logs [N]|drain|update   run status, logs, drain, or a pull of main
-#                           and a drain, on each machine in runner/hosts
+#   gcauc-runner pause OWNER/REPO    serve none of the repo's jobs on this machine and stop its VM,
+#   gcauc-runner resume OWNER/REPO   or serve them again, with no change in git (runner/.paused)
+#   gcauc-runner fleet status|logs [N]|drain|update|pause R|resume R   run status, logs, drain, a
+#                           pull of main and a drain, pause or resume on each machine in runner/hosts
 # status and logs only read, so a Claude Code allow rule can run them without a prompt.
 # Each repo has its own VM (gcauc-<repo>), so one project's jobs never share a Docker engine
 # with another project's. Each job runs in a fresh container registered with a one-job
@@ -29,6 +31,9 @@ repos_file="$here/repos"
 [ ! -e "$here/repos.$host" ] || repos_file="$here/repos.$host"
 # While this file exists, a slot takes no new job: it stops after its current one (gcauc-runner drain).
 drain_file="$here/.drain"
+# The repos that this machine does not serve, one owner/repo per line (gcauc-runner pause). The file
+# is not in git, so a pause needs no commit, and it holds on this machine only.
+paused_file="$here/.paused"
 # One file per slot, per repo: "free", "waiting" (its runner has no job yet) or "busy". See slot.
 statedir="$here/.slots"
 if [ "$os" = Darwin ]; then
@@ -57,12 +62,17 @@ in_vm() {
 }
 
 # runner/repos: "owner/repo slots [cpus] [memory GiB]" per line, # comments.
-# CPUs default to 4 per slot and memory to 4 GiB per slot.
+# CPUs default to 4 per slot and memory to 4 GiB per slot. A repo in runner/.paused is left out.
+# GitHub names ignore case, so the pause checks compare names in lower case.
 lines=()
 load_repos() {
-  local l
+  local l p
+  p=" $(paused_repos | tr '\n' ' ')"
   lines=()
-  while IFS= read -r l; do lines+=("$l"); done < <(sed 's/#.*//' "$repos_file" | awk 'NF >= 2')
+  while IFS= read -r l; do lines+=("$l"); done < <(sed 's/#.*//' "$repos_file" | awk -v p="$p" 'NF >= 2 && !index(p, " " tolower($1) " ")')
+}
+paused_repos() {
+  [ ! -e "$paused_file" ] || sed 's/#.*//' "$paused_file" | awk 'NF { print tolower($1) }'
 }
 # Sets repo, slots, cpus, mem and vm from one runner/repos line.
 parse() {
@@ -456,8 +466,9 @@ clear_vms() {
   done
 }
 
-# Stop each g-cauc VM whose repo runner/repos no longer names, so its memory goes back to this
-# machine before cmd_up sizes the others. serve calls it at its start, when no job runs.
+# Stop each g-cauc VM whose repo runner/repos no longer names or runner/.paused names, so its memory
+# goes back to this machine before cmd_up sizes the others. serve calls it at its start, when no job
+# runs.
 stop_unlisted() {
   local l want=" " v
   for l in ${lines[@]+"${lines[@]}"}; do
@@ -467,7 +478,7 @@ stop_unlisted() {
   for v in $(limactl list -q 2>/dev/null | grep '^gcauc-'); do
     case "$want" in *" $v "*) continue ;; esac
     if [ "$(limactl list "$v" --format '{{.Status}}')" = Running ]; then
-      log "$v: its repo is not in $repos_file, so it stops"
+      log "$v: $repos_file does not name its repo, or the repo is paused, so it stops"
       limactl stop "$v" </dev/null >/dev/null 2>&1 || true
     fi
   done
@@ -506,8 +517,12 @@ cmd_serve() {
     done
   done
   # || true: under set -e, a kill that fails (a slot already gone) must not skip clear_vms.
-  trap 'kill "${pids[@]}" 2>/dev/null || true; clear_vms; exit 0' TERM INT
+  # pids is empty when every repo is paused, and bash 3.2 reads "${pids[@]}" as unset then.
+  trap 'kill ${pids[@]+"${pids[@]}"} 2>/dev/null || true; clear_vms; exit 0' TERM INT
   log "serving ${#pids[@]} slots in ${#lines[@]} VMs"
+  # When every repo is paused, no slot runs, so wait returns at once. serve then waits for a drain (a
+  # resume), because the agent starts serve again each time it exits.
+  until [ "${#pids[@]}" != 0 ] || [ -e "$drain_file" ]; do sleep 10; done
   wait
   # Every slot returned, which happens only in a drain: exit, and the agent starts serve again.
   log "every slot stopped (drain); exiting so the agent starts serve again"
@@ -531,6 +546,45 @@ cmd_drain() {
   log "drain: no slot registers a new runner. Running jobs finish, then serve exits and the agent starts it again"
 }
 
+# pause and resume change runner/.paused, and a drain applies the change: serve starts again without
+# the repo and stops its VM, or with the repo and starts its VM. pause drains only when the running
+# serve serves the repo, and resume only when runner/repos names it. A name that neither names (for
+# example a typo) changes nothing now, and the command tells this.
+valid_repo() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$ ]]; }
+cmd_pause() {
+  local repo
+  valid_repo "$1" || { echo "usage: gcauc-runner pause OWNER/REPO" >&2; exit 2; }
+  repo="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
+  if paused_repos | grep -xF -- "$repo" >/dev/null; then
+    echo "$host: $repo is paused already"
+    return 0
+  fi
+  echo "$repo" >>"$paused_file"
+  echo "$host: $repo is paused"
+  if awk -v r="$repo" 'tolower($1) == r { f = 1 } END { exit !f }' "$statedir/.repos" 2>/dev/null; then
+    cmd_drain
+  else
+    echo "$host: serve does not serve $repo now, so no drain is necessary"
+  fi
+}
+cmd_resume() {
+  local repo
+  valid_repo "$1" || { echo "usage: gcauc-runner resume OWNER/REPO" >&2; exit 2; }
+  repo="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
+  if ! paused_repos | grep -xF -- "$repo" >/dev/null; then
+    echo "$host: $repo is not paused"
+    return 0
+  fi
+  awk -v r="$repo" '{ l = $0; sub(/#.*/, "", l); n = split(l, f) } !(n && tolower(f[1]) == r)' "$paused_file" >"$paused_file.new"
+  mv -f "$paused_file.new" "$paused_file"
+  echo "$host: $repo is not paused now"
+  if sed 's/#.*//' "$repos_file" | awk -v r="$repo" 'tolower($1) == r { f = 1 } END { exit !f }'; then
+    cmd_drain
+  else
+    echo "$host: $repos_file does not name $repo, so no drain is necessary"
+  fi
+}
+
 cmd_logs() {
   local n="${1:-100}"
   case "$n" in '' | *[!0-9]*) echo "usage: gcauc-runner logs [N]" >&2; exit 2 ;; esac
@@ -548,6 +602,7 @@ cmd_status() {
     gh api "repos/$repo/actions/runners?per_page=100" --jq \
       ".runners[] | select([.labels[].name] | index(\"$label\")) | \"  \(.name) \(.status) busy=\(.busy)\""
   done
+  for l in $(paused_repos); do echo "$l: paused on this machine (gcauc-runner resume $l)"; done
   if [ "$os" = Darwin ]; then
     if launchctl print "gui/$(id -u)/com.gcauc.runner" >/dev/null 2>&1; then echo "launchd: com.gcauc.runner loaded"; else echo "launchd: not installed"; fi
   else
@@ -632,9 +687,17 @@ cmd_uninstall() {
 # fleet goes on to the next machine after a failure, and exits 1 if any machine failed.
 cmd_fleet() {
   local cmd="${1:-status}" n="${2:-}" h rc=0
-  # Only logs takes an argument, and only digits, because the ssh command line holds it.
-  case "$cmd:$n" in status: | drain: | update: | logs: | logs:[0-9]*) ;; *) echo "usage: gcauc-runner fleet status|logs [N]|drain|update" >&2; exit 2 ;; esac
-  case "$n" in *[!0-9]*) echo "usage: gcauc-runner fleet logs [N]" >&2; exit 2 ;; esac
+  # The ssh command line holds the argument, so logs takes only digits, and pause and resume take
+  # only an owner/repo name.
+  case "$cmd:$n" in
+    status: | drain: | update: | logs: | logs:[0-9]*) case "$n" in *[!0-9]*) n=- ;; esac ;;
+    pause:* | resume:*) valid_repo "$n" || n=- ;;
+    *) n=- ;;
+  esac
+  if [ "$n" = - ]; then
+    echo "usage: gcauc-runner fleet status|logs [N]|drain|update|pause OWNER/REPO|resume OWNER/REPO" >&2
+    exit 2
+  fi
   while IFS= read -r h; do
     echo "== $h"
     # This machine also runs the command in its own process: bash ignores set -e inside a command
@@ -655,6 +718,8 @@ fleet_one() {
     status) cmd_status ;;
     logs) cmd_logs "${2:-}" ;;
     drain) cmd_drain ;;
+    pause) cmd_pause "${2:-}" ;;
+    resume) cmd_resume "${2:-}" ;;
     update)
       # The pool runs main. A checkout on another branch, or one that cannot fast-forward, stops
       # before the drain.
@@ -678,7 +743,9 @@ case "${1:-}" in
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
   drain) cmd_drain ;;
+  pause) cmd_pause "${2:-}" ;;
+  resume) cmd_resume "${2:-}" ;;
   fleet) cmd_fleet "${2:-status}" "${3:-}" ;;
   fleet-one) fleet_one "${2:-}" "${3:-}" ;;
-  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
