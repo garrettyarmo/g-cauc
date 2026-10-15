@@ -14,7 +14,7 @@ gcauc-runner serve                        one fresh container per job, from gcau
     sweep the slot's leftover containers
 ```
 
-- `runner/lima.yaml`: the template for each repo's VM. Ubuntu 24.04 (the same release as `ubuntu-latest` until GitHub moves it), Docker from Ubuntu's packages. No host mounts, no port forwarding to the Mac, no SSH agent forwarding.
+- `runner/lima.yaml`: the template for each repo's VM. Ubuntu 24.04 (the same release as `ubuntu-latest` until GitHub moves it), Docker from Ubuntu's packages. No host mounts, no port forwarding to the Mac, no SSH agent forwarding. One time source: Lima keeps the VM's clock on the machine's clock, so the template masks `systemd-timesyncd` (see "One time source" below).
 - `runner/image/Dockerfile`: GitHub's own runner image, pinned, plus `psql` and a checksum-pinned `docker compose`.
 - `runner/gcauc-runner`: the supervisor (`up`, `serve`, `status`, `logs`, `rebuild`, `install`, `uninstall`).
 - `runner/repos`: the repositories that the pool serves. Each line gives the slots (the most jobs at the same time), the CPUs and the memory of that repo's VM. The VMs share the Mac's CPUs, so a quiet VM uses almost no CPU. Each VM keeps its memory, so the total memory must leave room for the Mac.
@@ -104,3 +104,32 @@ Before 2026-10-05, one VM (`gcauc-ci`) ran the jobs of all repos. To move to one
 1. Run `gcauc-runner up`. It makes the new VMs, and `gcauc-ci` continues to serve jobs.
 2. When no slot is busy, restart the agent. The new supervisor serves from the new VMs.
 3. Stop the old VM with `limactl stop gcauc-ci`. When the new VMs work, delete it with `limactl delete gcauc-ci`.
+
+## One time source (2026-10-12)
+
+Before 2026-10-12, two services set the clock of each VM. Lima's guest agent compares the VM's clock with the machine's clock every 10 seconds. If they differ by more than 100 ms, it sets the VM's clock to the machine's clock. `systemd-timesyncd` also moved the same clock, to `ntp.ubuntu.com`. The two services fought.
+
+On 2026-10-12, the clock of each VM on the Mac stepped back 320 to 380 times, by 100 to 260 ms each time. CallFlow tests that order events by wall clock failed (garrettyarmo/callflow#369).
+
+Lima is now the one time source, for these reasons:
+
+- Lima 2.2 has no option that stops its time sync. Only `plain: true` stops it, and that mode also removes the guest agent.
+- Lima reads the machine's clock over a local connection, usually in about 1 ms. timesyncd uses `ntp.ubuntu.com`, with a delay of 120 ms.
+- After the machine sleeps, Lima corrects the VM's clock in 10 seconds. timesyncd can wait 34 minutes for its next poll.
+
+At each boot, the first `provision` script in `runner/lima.yaml` masks `systemd-timesyncd`. Then it clears the frequency and the offset that timesyncd left in the kernel. The kernel keeps them after timesyncd stops (+91 ppm on `gcauc-callflow`). It also sets the kernel's error bound to its limit of 16 seconds, because `timedatectl` uses that bound to report a sync.
+
+Thus a VM shows `NTP=no` and `NTPSynchronized=no` in `timedatectl show`. That is correct: no NTP client runs, and Lima keeps the clock on the machine's clock.
+
+Two types of step remain:
+
+- The VM's clock now runs at the rate of the hardware counter. On 2026-10-12, the Mac's clock ran 7 to 25 ppm faster than that counter. Thus a VM falls 100 ms behind in about 1 to 4 hours, and Lima steps it forward one time. A forward step does not change the order of events.
+- Lima can step a clock back by mistake. The machine reads its own clock and sends that time to the VM. The VM compares it with its own clock when the message arrives, and it does not subtract the delay. If the message is more than about 100 ms late, Lima sets the VM's clock back to the late time. On 2026-10-12, this occurred one time in 2.6 hours of tests on three VMs: a new VM booted on the Mac, and the clock of another VM stepped back 109 ms. The fix must come from Lima (lima-vm/lima#5543).
+
+Lima copies the template only when it creates a VM. To fix an older VM without a rebuild, run this on each machine of the pool. It runs the same script in each `gcauc-` VM that runs. It does not step the clock and it does not stop a job. The VM keeps the change after a restart.
+
+```bash
+for vm in $(limactl list --format '{{.Name}} {{.Status}}' | awk '/^gcauc-/ && $2 == "Running" { print $1 }'); do
+  limactl template yq ~/code/g-cauc/runner/lima.yaml '.provision[] | select(.script | test("timesyncd")) | .script' | limactl shell --workdir / "$vm" -- sudo bash
+done
+```
