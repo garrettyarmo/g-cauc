@@ -14,6 +14,7 @@
 # Add a line when a project adopts g-cauc (the adopt skill), then run `gcauc-runner up` and
 # restart the agent with no job running (launchctl kickstart -k gui/$(id -u)/com.gcauc.runner).
 garrettyarmo/callflow 2 12 12
-garrettyarmo/bisonbrain 4 12 16
+# 2026-10-15: Garrett set Bison Brain to 4 slots in total, 2 here and 2 on omarchy (bisonbrain issue 766). 3 full runs at once doubled each run and failed tests with time limits.
+garrettyarmo/bisonbrain 2 12 16
 garrettyarmo/myqap 4 8 10
 garrettyarmo/lrcp-ops 1 2 4
