@@ -4,4 +4,5 @@
 # 40 min for a Mac slot. The two VMs take 22 GiB and leave 8 GiB for the desktop.
 garrettyarmo/myqap 4 8 10
 # Bison Brain's deploy-staging builds linux/arm64 images, so it pins ARM64 (bisonbrain PR 673).
-garrettyarmo/bisonbrain 3 10 12
+# 2026-10-15: 2 slots, so the pool total is 4 (bisonbrain issue 766). With 3 slots, the VM ran out of memory and CI Postgres shut down.
+garrettyarmo/bisonbrain 2 10 12
