@@ -12,8 +12,9 @@ Two or three sentences: the product, who uses it, and the one thing it must neve
 
 - `scripts/done --fast`: lint, types and the tests for what changed. Paste its summary whenever you claim a pass.
 - `scripts/done --full`: everything, including the full end-to-end suite on a fresh stack. CI runs it on main, and on a PR when the foreman adds `ci:full`.
-- `scripts/dev up` / `scripts/dev down`: the app and its services for this worktree.
+- `scripts/dev up` / `scripts/dev down`: the app and its services for this worktree. Each agent that has its own worktree runs `scripts/dev down` there before it stops. A subagent that shares its parent's worktree leaves the stack to the parent. Run it in a worktree before you remove that worktree. `scripts/done` and `scripts/dev testdb` start the services too, so run it even if you did not run `scripts/dev up`.
 - `scripts/dev testdb -- CMD`: CMD against a throwaway database.
+- `scripts/dev reap`: stops the stacks of deleted worktrees. `scripts/dev up` and `testdb` run it first.
 - `scripts/deploy staging`: deploy main to staging, then the smoke pass. CI runs it after every merge.
 
 ## Layout
