@@ -12,6 +12,7 @@
 # address to a new veth or bridge (Bison Brain issue 745), and a failure there does not stop serve.
 # The two scripts that stop Lima's clock steps in each VM run against a fake root: each restarts its
 # service until the service has its setting, and the guest agent keeps CAP_SYS_TIME without timesyncd.
+# pause stops serving a repo and stops its VM, and resume serves it again, with no change in git.
 # serve runs here against fake limactl, docker and gh in a scratch folder, so no VM, runner
 # registration or container is touched.
 #   runner/test-orphan.sh [gcauc-runner to test]   (default: the one next to this file)
@@ -45,11 +46,12 @@ cp "$(dirname "$src")/image/Dockerfile" "$FAKE/runner/image/"
 echo 'garrettyarmo/fake 1 2 2' >"$FAKE/runner/repos"
 
 # The test stops the VM with $FAKE/vmstatus, cuts off its shell with $FAKE/noshell, and fails its
-# status query with $FAKE/nolist. A start shows as a line in $FAKE/starts.
+# status query with $FAKE/nolist. A start shows as a line in $FAKE/starts, and a stop in $FAKE/stops.
 cat >"$FAKE/bin/limactl" <<'EOF'
 #!/bin/bash
 case "$1" in
   start) echo "$*" >>"$FAKE/starts" ;;
+  stop) echo "$*" >>"$FAKE/stops" ;;
   list)
     [ "${2:-}" = -q ] && { echo gcauc-fake; exit 0; }
     case "${4:-}" in
@@ -179,9 +181,10 @@ printf '#!/bin/sh\necho 999\n' >"$FAKE/vmbin/stat"
 printf '#!/bin/sh\necho 2\n' >"$FAKE/vmbin/nproc"
 chmod +x "$FAKE/bin/"* "$FAKE/vmbin/"*
 
+# /bin/bash, as the launchd agent and the systemd unit run it: on the Mac it is bash 3.2.
 in_fake() {
   HOME="$FAKE/home" XDG_STATE_HOME="$FAKE/state" XDG_CONFIG_HOME="$FAKE/config" PATH="$FAKE/bin:$PATH" \
-    bash "$FAKE/runner/gcauc-runner" "$@"
+    /bin/bash "$FAKE/runner/gcauc-runner" "$@"
 }
 start_serve() {
   in_fake serve >>"$FAKE/serve.log" 2>&1 &
@@ -204,6 +207,7 @@ wait_for() {
   return 1
 }
 waiting_runners() { [ "$(grep -c 'is waiting for a job' "$FAKE/serve.log")" -ge "$1" ]; }
+paused_serves() { [ "$(grep -c 'serving 0 slots' "$FAKE/serve.log")" -ge "$1" ]; }
 state_is() { grep -q "^$1 " "$FAKE/runner/.slots/fake/1" 2>/dev/null; }
 alive() { [ -e "$c/$1.pid" ] && kill -0 "$(cat "$c/$1.pid")" 2>/dev/null; }
 serve_ended() { ! kill -0 "$spid" 2>/dev/null; }
@@ -419,4 +423,65 @@ run_clock "$ga" || fail "the guest agent script failed with nothing to do: $(cat
 if grep -Eq 'restart|daemon-reload' "$r/systemctl"; then fail "a clock script restarted a service that had its setting: $(cat "$r/systemctl")"; fi
 touch "$r/notimesyncd"
 if run_clock "$ts"; then fail "the timesyncd script succeeded although timesyncd did not run"; fi
-echo "PASS: the slot waited for its VM and its container, removed a stopped container, ended in a drain when no job could run or GitHub deleted its runner, the drain deleted only the idle runners of the running serve, and the clock scripts restarted each service until it had its setting"
+# 8. pause drains, and serve starts again without the repo: it stops the repo's VM, registers no
+# runner, and waits for a drain, so the agent does not start it again and again. A TERM still ends
+# it with exit 0. A repo that serve does not serve drains nothing on pause, and a repo that
+# runner/repos does not name drains nothing on resume. resume drains, and serve serves the repo again.
+rm -f "$FAKE/deletes" "$FAKE/runner/.drain" "$FAKE/runners."*.json
+before="$(grep -c 'is waiting for a job' "$FAKE/serve.log" || true)"
+start_serve
+wait_for 30 waiting_runners $((before + 1)) || fail "serve did not start again before the pause"
+name="$(sed -n 's/.*slot 1: \(.*\) is waiting for a job.*/\1/p' "$FAKE/serve.log" | tail -1)"
+page "$(runner 31 "$name" online false)" >"$FAKE/runners.1.json"
+in_fake pause garrettyarmo/fake >"$FAKE/pause.log" 2>&1 || fail "pause failed: $(cat "$FAKE/pause.log")"
+grep -qxF garrettyarmo/fake "$FAKE/runner/.paused" || fail "pause did not add the repo to runner/.paused"
+grep -q 'runners/31$' "$FAKE/deletes" 2>/dev/null || fail "pause did not drain: $(cat "$FAKE/pause.log")"
+wait_for 40 serve_ended || fail "serve did not exit after the pause"
+rm -f "$FAKE/runners."*.json
+mints="$(wc -l <"$FAKE/mints" | tr -d ' ')"
+serves="$(grep -c 'serving 0 slots' "$FAKE/serve.log" || true)"
+start_serve
+wait_for 30 grep -q 'gcauc-fake: .*or the repo is paused, so it stops' "$FAKE/serve.log" ||
+  fail "serve did not tell that it stops the VM of the paused repo"
+wait_for 10 grep -qx 'stop gcauc-fake' "$FAKE/stops" || fail "serve did not stop the VM of the paused repo"
+wait_for 30 paused_serves $((serves + 1)) || fail "serve did not start with every repo paused"
+sleep 12
+if serve_ended; then fail "serve exited with every repo paused, so the agent would start it again and again"; fi
+[ "$(wc -l <"$FAKE/mints" | tr -d ' ')" = "$mints" ] || fail "serve registered a runner for a paused repo"
+in_fake status 2>/dev/null | grep '^garrettyarmo/fake: paused' >/dev/null || fail "status did not list the paused repo"
+in_fake pause garrettyarmo/other >"$FAKE/pause.log" 2>&1 || fail "pause of another repo failed: $(cat "$FAKE/pause.log")"
+grep -q 'no drain is necessary' "$FAKE/pause.log" || fail "pause of a repo that serve does not serve did not tell it"
+# GitHub names ignore case, so a pause or resume in another case acts on the same repo.
+in_fake pause GarrettYarmo/Other >"$FAKE/pause.log" 2>&1 || fail "a second pause failed: $(cat "$FAKE/pause.log")"
+grep -q 'is paused already' "$FAKE/pause.log" || fail "a second pause in another case did not tell that the repo is paused already"
+in_fake resume GarrettYarmo/Other >"$FAKE/pause.log" 2>&1 || fail "resume of another repo failed: $(cat "$FAKE/pause.log")"
+grep -q 'does not name garrettyarmo/other, so no drain' "$FAKE/pause.log" ||
+  fail "resume of a repo that runner/repos does not name did not tell it"
+in_fake resume garrettyarmo/other >"$FAKE/pause.log" 2>&1 || fail "a second resume failed: $(cat "$FAKE/pause.log")"
+grep -q 'is not paused' "$FAKE/pause.log" || fail "a second resume did not tell that the repo is not paused"
+# A name that is not owner/repo goes into no file and no ssh command line.
+for a in "pause" "pause bad" "pause -x/y" "pause a/b;x" "fleet pause a/b;x" "fleet resume -x/y" "fleet logs 5x"; do
+  rc=0
+  # shellcheck disable=SC2086
+  in_fake $a >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 2 ] || fail "'gcauc-runner $a' exited $rc, not 2"
+done
+[ ! -e "$FAKE/runner/.drain" ] || fail "pause or resume of a repo that serve does not serve drained"
+if grep -qxF garrettyarmo/other "$FAKE/runner/.paused"; then fail "resume left garrettyarmo/other in runner/.paused"; fi
+grep -qxF garrettyarmo/fake "$FAKE/runner/.paused" || fail "resume of another repo removed garrettyarmo/fake"
+# spid is the subshell of start_serve, so the TERM goes to serve itself, as the agent sends it.
+rc=0
+/usr/bin/pkill -TERM -f "$FAKE/runner/gcauc-runner serve"
+wait "$spid" || rc=$?
+[ "$rc" = 0 ] || fail "serve with every repo paused exited $rc on TERM"
+if grep -q 'unbound variable' "$FAKE/serve.log"; then fail "serve read an unset variable with every repo paused"; fi
+start_serve
+wait_for 30 paused_serves $((serves + 2)) || fail "serve did not start again with every repo paused"
+in_fake resume garrettyarmo/fake >"$FAKE/pause.log" 2>&1 || fail "resume failed: $(cat "$FAKE/pause.log")"
+if grep -qxF garrettyarmo/fake "$FAKE/runner/.paused"; then fail "resume left the repo in runner/.paused"; fi
+wait_for 30 serve_ended || fail "serve with every repo paused did not exit in the drain of a resume"
+before="$(grep -c 'is waiting for a job' "$FAKE/serve.log" || true)"
+start_serve
+wait_for 30 waiting_runners $((before + 1)) || fail "serve did not serve the repo again after the resume"
+
+echo "PASS: the slot waited for its VM and its container, removed a stopped container, ended in a drain when no job could run or GitHub deleted its runner, the drain deleted only the idle runners of the running serve, the clock scripts restarted each service until it had its setting, and pause and resume stopped and started serving the repo"
