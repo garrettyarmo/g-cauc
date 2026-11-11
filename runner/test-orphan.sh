@@ -3,7 +3,8 @@
 # for the container. It must not sweep the job's services or start a new runner on the same name.
 # On 2026-10-13 a signal ended the limactl shell clients of live jobs: the sweeps removed their
 # services, and each slot then failed every 20 s with exit 125 (the name was taken).
-# It also checks that a slot removes a stopped container that keeps its name, and that a drain
+# It also checks that a slot removes a stopped container that keeps its name, that a sweep removes a
+# container that no slot owns once it is older than GitHub's 6-hour job limit, and that a drain
 # ends a slot that cannot read its VM once no job can run there. A slot of a VM that does not run
 # registers no runner, and on Linux serve starts the VM in its own systemd scope. A drain reads every
 # page of runners and deletes each idle runner that the running serve registered, whatever status
@@ -98,7 +99,8 @@ EOF
 # A container is a process apart from its docker run client, as in the VM: ending the client does
 # not end the container. The runner in it takes a job when the test writes <name>.job, and the job
 # ends when the test writes <name>.done. <name>.stop stops the container without its removal, so it
-# keeps its name (<name>.stopped). A sweep shows as a line in $FAKE/sweeps.
+# keeps its name (<name>.stopped). A sweep shows as a line in $FAKE/sweeps. <name>.created holds the
+# creation time of a container that the test puts in the VM, and docker ps -a lists it as exited.
 cat >"$FAKE/vmbin/docker" <<'EOF'
 #!/bin/bash
 c="$FAKE/containers"
@@ -148,7 +150,7 @@ case "$1" in
     for n in $(cd "$c" && ls | sed 's/\..*//' | sort -u); do
       if alive "$n"; then
         st=running
-      elif [ "$all" = 1 ] && [ -e "$c/$n.stopped" ]; then
+      elif [ "$all" = 1 ] && { [ -e "$c/$n.stopped" ] || [ -e "$c/$n.created" ]; }; then
         st=exited
       else
         continue
@@ -156,10 +158,16 @@ case "$1" in
       printf '%s\n' "$n" | grep -Eq "$re" || continue
       case "$fmt" in *State*) echo "$st" ;; '') echo "$n" ;; *) echo "$n Up" ;; esac
     done ;;
+  inspect)
+    [ "$2" = --format ] && [ "$3" = '{{.Id}} {{.Created}} {{.Name}}' ] || { echo "fake docker: inspect $*" >&2; exit 1; }
+    shift 3
+    for a in "$@"; do
+      printf '%s %s /%s\n' "$a" "$(cat "$c/$a.created" 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S.000000000Z)" "$a"
+    done ;;
   rm)
     for a in "$@"; do
       [ -e "$c/$a.pid" ] && kill "$(cat "$c/$a.pid")" 2>/dev/null
-      rm -f "$c/$a.pid" "$c/$a.stopped"
+      rm -f "$c/$a.pid" "$c/$a.stopped" "$c/$a.created"
     done ;;
   logs) cat "$c/$2.out" ;;
   events) while :; do sleep 1; done ;;
@@ -178,6 +186,14 @@ EOF
 # $FAKE/nosudo exists.
 printf '#!/bin/sh\necho "$*" >>"$FAKE/sudo"\n[ ! -e "$FAKE/nosudo" ]\n' >"$FAKE/vmbin/sudo"
 printf '#!/bin/sh\necho 999\n' >"$FAKE/vmbin/stat"
+# GNU date -d TIME +%s, as the sweep runs it in the VM, also where /bin/date is BSD's (the Mac).
+cat >"$FAKE/vmbin/date" <<'EOF'
+#!/bin/bash
+if [ "${1:-}" = -d ] && ! /bin/date -d @0 +%s >/dev/null 2>&1; then
+  TZ=UTC exec /bin/date -j -f %Y-%m-%dT%H:%M:%S "${2:0:19}" "${3:-+%s}"
+fi
+exec /bin/date "$@"
+EOF
 printf '#!/bin/sh\necho 2\n' >"$FAKE/vmbin/nproc"
 chmod +x "$FAKE/bin/"* "$FAKE/vmbin/"*
 
@@ -256,9 +272,22 @@ sleep 15
 no_exit_125 "the slot started a runner while its container still ran"
 [ ! -e "$FAKE/sweeps" ] || fail "the slot swept while its container still ran a job"
 [ "$(wc -l <"$FAKE/mints" | tr -d ' ')" = 1 ] || fail "the slot minted a runner config while its container still ran"
+# The sweep after the job also removes each container that no slot owns (its name does not start with
+# gcauc-) and that is older than GitHub's 6-hour job limit, since no running job can use it. A cancelled
+# job leaves one when its own cleanup does not run: on 2026-11-11, 14 test databases of myqap's
+# warehouse suite filled its VM's disk. A newer container may belong to a job in another slot.
+iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%S.123456789Z 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%S.123456789Z; }
+now="$(date +%s)"
+iso $((now - 7 * 3600)) >"$c/leaked-db.created"
+iso $((now - 3600)) >"$c/fresh-db.created"
+iso $((now - 7 * 3600)) >"$c/gcauc-other-1.created"
 touch "$c/gcauc-fake-1.done"
 wait_for 40 waiting_runners 2 || fail "the slot did not start a new runner after its container stopped"
 [ -e "$FAKE/sweeps" ] || fail "the slot did not sweep after its container stopped"
+[ ! -e "$c/leaked-db.created" ] || fail "the sweep left a container that no slot owns and that is older than 6 hours"
+[ -e "$c/fresh-db.created" ] || fail "the sweep removed a container newer than 6 hours, which a running job may use"
+[ -e "$c/gcauc-other-1.created" ] || fail "the sweep removed a slot's own container by its age"
+rm -f "$c/fresh-db.created" "$c/gcauc-other-1.created"
 no_exit_125 "a docker run failed with exit 125"
 
 # 2. The container stops, but its removal fails, so it keeps its name: the slot removes it.
@@ -484,4 +513,4 @@ before="$(grep -c 'is waiting for a job' "$FAKE/serve.log" || true)"
 start_serve
 wait_for 30 waiting_runners $((before + 1)) || fail "serve did not serve the repo again after the resume"
 
-echo "PASS: the slot waited for its VM and its container, removed a stopped container, ended in a drain when no job could run or GitHub deleted its runner, the drain deleted only the idle runners of the running serve, the clock scripts restarted each service until it had its setting, and pause and resume stopped and started serving the repo"
+echo "PASS: the slot waited for its VM and its container, removed a stopped container, swept only the containers older than 6 hours that no slot owns, ended in a drain when no job could run or GitHub deleted its runner, the drain deleted only the idle runners of the running serve, the clock scripts restarted each service until it had its setting, and pause and resume stopped and started serving the repo"

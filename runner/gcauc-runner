@@ -172,14 +172,20 @@ cmd_rebuild() {
   done
 }
 
-# Remove what a slot's job left in its VM's Docker: the containers and volumes of the compose
-# projects under its work folder (the events record names a project that the job already stopped),
-# the anonymous volumes that no container uses (each GitHub service container leaves one), and the
-# named volumes that no container uses and that are older than GitHub's 6-hour job limit. A running
-# job of another slot can stop its project and start it again, so the sweep never removes a newer
-# volume by age alone.
+# Remove what a slot's job left in its VM's Docker: the containers that no slot owns (the name does
+# not start with gcauc-) and that are older than GitHub's 6-hour job limit (a cancelled job leaves one
+# when its own cleanup does not run, as myqap's warehouse tests did on 2026-11-11), the containers and
+# volumes of the compose projects under its work folder (the events record names a project that the
+# job already stopped), the anonymous volumes that no container uses (each GitHub service container
+# leaves one), and the named volumes that no container uses and that are older than the job limit. A
+# running job of another slot can use a newer container and can stop its project and start it again,
+# so the sweep never removes a newer container or volume by age alone.
 sweep() {
   local vm="$1" dir="$2" events="$3" p
+  in_vm "$vm" sh -c 'old=$(($(date +%s) - 6 * 3600)); docker ps -aq \
+    | xargs -r docker inspect --format "{{.Id}} {{.Created}} {{.Name}}" \
+    | while read -r c t n; do case "$n" in /gcauc-*) continue ;; esac; [ "$(date -d "$t" +%s)" -lt "$old" ] && echo "$c"; done \
+    | xargs -r docker rm -fv' </dev/null >/dev/null 2>&1 || true
   in_vm "$vm" sh -c "docker ps -aq --filter label=com.docker.compose.project.working_dir \
     | xargs -r docker inspect --format '{{.Id}} {{index .Config.Labels \"com.docker.compose.project.working_dir\"}}' \
     | awk -v d='$dir' 'index(\$2, d) == 1 { print \$1 }' | xargs -r docker rm -fv" </dev/null >/dev/null 2>&1 || true
